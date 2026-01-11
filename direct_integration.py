@@ -40,12 +40,12 @@ centers = np.array(
 trajectories = np.empty((num_particles, num_timestamps, 3))
 
 # We apply a decay to the trajectories to ensure the integral decays near the boundaries
-# TODO: use a better envelope
-trajectory_radius = (
-    5
-    * lmbd
-    * np.exp(-((timestamps - integration_time / 2) ** 2) / (integration_time**2 / 32))
+slope = 20
+cutoff = np.exp(-1 / (timestamps / slope + 1e-10) ** 2) * np.exp(
+    -1 / (((integration_time - timestamps) / slope + 1e-10) ** 2)
 )
+
+trajectory_radius = 5 * lmbd * cutoff
 
 trajectories[:, :, 0] = (
     centers[:, 0, np.newaxis]
