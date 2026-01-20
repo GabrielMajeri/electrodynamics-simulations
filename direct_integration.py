@@ -21,7 +21,7 @@ lmbd = c * (2 * np.pi / omega_laser)
 # print("Lambda:", lmbd)
 
 # Number of particles (electrons) to simulate
-num_particles = 10
+num_particles = 30
 
 particle_indices = np.arange(num_particles, dtype=np.int32)
 
@@ -35,7 +35,7 @@ class CircularTrajectories(NamedTuple):
 
 def simulate_circular_trajectories(
     # Radius of the large circle around which the particle's center are positioned.
-    large_circle_radius=50 * lmbd,
+    large_circle_radius,
     # How many timestamps to use (will affect trajectory sampling frequency)
     num_timestamps=4096,
 ) -> CircularTrajectories:
@@ -76,14 +76,17 @@ def simulate_circular_trajectories(
         "Particles move faster than speed of light"
     )
 
-    trajectories[:, :, 0] = (
-        centers[:, 0, np.newaxis]
-        + (trajectory_radius * np.cos(omega_laser * timestamps))[np.newaxis, :]
+    num_wraps = 1
+    phi_0 = particle_indices * num_wraps * (2 * np.pi) / num_particles
+
+    trajectories[:, :, 0] = centers[:, 0, np.newaxis] + (
+        trajectory_radius
+        * np.cos(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
     )
 
-    trajectories[:, :, 1] = (
-        centers[:, 1, np.newaxis]
-        + (trajectory_radius * np.sin(omega_laser * timestamps))[np.newaxis, :]
+    trajectories[:, :, 1] = centers[:, 1, np.newaxis] + (
+        trajectory_radius
+        * np.sin(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
     )
 
     trajectories[:, :, 2] = 0
@@ -91,7 +94,7 @@ def simulate_circular_trajectories(
     return CircularTrajectories(integration_duration, timestamps, centers, trajectories)
 
 
-def plot_configuration(trajectories: Array, detector_position: Array) -> None:
+def plot_configuration(trajectories: Array, detector_positions: Array) -> None:
     "Plot the current simulated setup (particles and detector)."
 
     fig = plt.figure()
@@ -109,7 +112,7 @@ def plot_configuration(trajectories: Array, detector_position: Array) -> None:
             z,
         )
 
-    ax.scatter(*detector_position, s=10)
+    ax.plot(*detector_positions.T)
     ax.set_xlabel("$x$")
     ax.set_ylabel("$y$")
     ax.set_zlabel("$z$")
@@ -122,20 +125,36 @@ if __name__ == "__main__":
     plots_dir = Path(__file__).parent / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
+    large_circle_radius = 50 * lmbd
     integration_duration, timestamps, centers, trajectories = (
-        simulate_circular_trajectories()
+        simulate_circular_trajectories(large_circle_radius)
     )
 
-    detector_position = np.array([0, 0, 1000 * lmbd])
+    # Allocate a buffer for the detectors' positions
+    detector_positions = np.zeros(shape=(1024, 3), dtype=np.float64)
 
-    if False:
-        plot_configuration(trajectories, detector_position)
+    # Linearly displaced detector points
+    detector_positions[:, 0] = np.linspace(
+        -30 * large_circle_radius,
+        30 * large_circle_radius,
+        detector_positions.shape[0],
+    )
+
+    # Radially displaced detector points
+    # phi = np.linspace(0, 2 * np.pi, 1024)
+    # detector_positions[:, 0] = 3.8 * large_circle_radius * np.cos(phi)
+    # detector_positions[:, 1] = 3.8 * large_circle_radius * np.sin(phi)
+
+    detector_positions[:, 2] = 1000 * lmbd
+
+    if True:
+        plot_configuration(trajectories, detector_positions)
 
     # Current offset of particle from "center" of its motion
     particle_displacements = trajectories - centers[:, np.newaxis, :]
     r_0s = particle_displacements
 
-    if False:
+    if True:
         plt.title("$r_0(t)$ for particle #1")
         plt.plot(timestamps, particle_displacements[0, :, 0], label="x")
         plt.plot(timestamps, particle_displacements[0, :, 1], label="y")
@@ -145,7 +164,7 @@ if __name__ == "__main__":
         plt.close()
 
     # Compute detector displacement (in each particle frame of reference)
-    x_0s = detector_position - centers
+    x_0s = detector_positions[:, np.newaxis, :] - centers[np.newaxis, :, :]
     x_0s_norms = np.linalg.vector_norm(x_0s, axis=-1)
 
     if False:
@@ -153,7 +172,7 @@ if __name__ == "__main__":
         # We expand in a Taylor series in terms of this value (should be very small)
         print("1/|x_0|:", 1 / x_0s_norms[0])
 
-    n_0s = x_0s / x_0s_norms[:, np.newaxis]
+    n_0s = x_0s / x_0s_norms[:, :, np.newaxis]
 
     # print(n_0s[0])
 
@@ -233,41 +252,37 @@ if __name__ == "__main__":
         print("Integral value:", integral)
         print("Integral absolute value:", np.abs(integral))
 
-    frequencies = np.linspace(0.5 * omega_laser, 2.5 * omega_laser, 256)
-    results = []
-
     dt = timestamps[1] - timestamps[0]
 
-    # Look at a grid of frequencies, around the frequency of the laser
-    for frequency in frequencies:
-        n_0_dot_r_0_all = np.vecdot(n_0s[:, np.newaxis, :], r_0s)
-        g = frequency * timestamps - frequency / c * n_0_dot_r_0_all
+    frequency = omega_laser
 
-        exponent = 1j * g
-        oscillatory_kernel = np.exp(exponent)
-        integrand = oscillatory_kernel * np.gradient(n_0_dot_r_0_all, axis=0)
+    n_0s_dot_r_0s = np.vecdot(n_0s[:, :, np.newaxis, :], r_0s)
+    g = frequency * timestamps - frequency / c * n_0s_dot_r_0s
 
-        # Approximate integral using Riemann sum
-        result = (1 / x_0s_norms) * dt * np.sum(integrand, axis=-1)
+    exponent = 1j * g
+    oscillatory_kernel = np.exp(exponent)
+    integrand = oscillatory_kernel * np.gradient(n_0s_dot_r_0s, axis=0)
 
-        # Sum across particles
-        result = np.sum(result, axis=-1)
+    # Approximate integral using Riemann sum
+    result = (1 / x_0s_norms) * dt * np.sum(integrand, axis=-1)
 
-        results.append(np.abs(result))
+    # Sum across particles
+    result = np.sum(result, axis=-1)
 
     plt.title("Integration results")
 
-    plt.plot(frequencies, results, label="$|\\phi|$")
-    plt.axvline(
-        omega_laser, ymin=0, ymax=1, label="$\\omega_{\\text{laser}}$", color="orange"
-    )
+    plt.plot(detector_positions[:, 0], np.abs(result), label="$|\\phi(x_0)|$")
+    # plt.plot(phi, np.angle(result), label="$\\arg \\phi(x_0)$")
 
-    plt.xlabel("Frequency ($\\omega$)")
-    plt.ylabel("Scalar potential intensity ($|\\phi|$)")
+    plt.xlabel("$x_0$")
+    plt.ylabel("Scalar potential absolute value ($|\\phi|$)")
+
+    # plt.xlabel("$\\phi$")
+    # plt.ylabel("Scalar potential argument ($\\arg \\phi$)")
 
     plt.legend()
     plt.grid()
 
-    plt.savefig("plots/scalar_potential_spectrum.pdf")
-    plt.show()
+    plt.tight_layout()
+    plt.savefig("plots/scalar_potential_vs_x_0.pdf")
     plt.close()
