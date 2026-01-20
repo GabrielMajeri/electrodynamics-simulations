@@ -58,7 +58,7 @@ def simulate_circular_trajectories(
 
     # Determine for how long the simulation/numerical integration will run
     # We'll use an integer multiple of the laser pulse's period
-    num_periods = 10
+    num_periods = 40
     integration_duration = num_periods * (2 * np.pi) / omega_laser
     timestamps = np.linspace(0, integration_duration, num_timestamps)
 
@@ -240,14 +240,18 @@ if __name__ == "__main__":
 
     # Look at a grid of frequencies, around the frequency of the laser
     for frequency in frequencies:
-        n_0_dot_r_0 = np.vecdot(n_0s[:, np.newaxis, :], r_0s)
-        g = frequency * timestamps - frequency / c * n_0_dot_r_0
+        n_0_dot_r_0_all = np.vecdot(n_0s[:, np.newaxis, :], r_0s)
+        g = frequency * timestamps - frequency / c * n_0_dot_r_0_all
 
         exponent = 1j * g
         oscillatory_kernel = np.exp(exponent)
-        integrand = oscillatory_kernel * np.gradient(n_0_dot_r_0, axis=-1)
+        integrand = oscillatory_kernel * np.gradient(n_0_dot_r_0_all, axis=0)
 
-        result = dt * np.sum(integrand)
+        # Approximate integral using Riemann sum
+        result = (1 / x_0s_norms) * dt * np.sum(integrand, axis=-1)
+
+        # Sum across particles
+        result = np.sum(result, axis=-1)
 
         results.append(np.abs(result))
 
@@ -264,5 +268,6 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid()
 
+    plt.savefig("plots/scalar_potential_spectrum.pdf")
     plt.show()
     plt.close()
