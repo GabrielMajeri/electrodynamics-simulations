@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import perf_counter
 from typing import NamedTuple
 
 import numpy as np
@@ -68,11 +69,12 @@ def simulate_circular_trajectories(
         -1 / (((integration_duration - timestamps) / slope + 1e-10) ** 2)
     )
 
-    trajectory_radius = 0.75 * lmbd * cutoff
+    trajectory_radius = 0.75 * lmbd
+    amplitude = trajectory_radius * cutoff
 
     # Compute instantaneous velocities and make sure we don't go faster than the speed of light
     # (this might happen if we set a trajectory with too large a circumference)
-    assert np.all(trajectory_radius / (2 * np.pi / omega_laser) < c), (
+    assert np.all(amplitude / (2 * np.pi / omega_laser) < c), (
         "Particles move faster than speed of light"
     )
 
@@ -80,16 +82,21 @@ def simulate_circular_trajectories(
     phi_0 = particle_indices * num_wraps * (2 * np.pi) / num_particles
 
     trajectories[:, :, 0] = centers[:, 0, np.newaxis] + (
-        trajectory_radius
+        amplitude
         * np.cos(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
     )
 
     trajectories[:, :, 1] = centers[:, 1, np.newaxis] + (
-        trajectory_radius
+        amplitude
         * np.sin(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
     )
 
-    trajectories[:, :, 2] = 0
+    # max_vertical_offset = 0
+    max_vertical_offset = 2 * trajectory_radius
+
+    rng = np.random.default_rng(42)
+    vertical_offsets = rng.uniform(low=0, high=max_vertical_offset, size=num_particles)
+    trajectories[:, :, 2] = vertical_offsets[:, np.newaxis]
 
     return CircularTrajectories(integration_duration, timestamps, centers, trajectories)
 
@@ -125,10 +132,16 @@ if __name__ == "__main__":
     plots_dir = Path(__file__).parent / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
+    print("Computing electron trajectories")
+
+    start_time = perf_counter()
     large_circle_radius = 50 * lmbd
     integration_duration, timestamps, centers, trajectories = (
         simulate_circular_trajectories(large_circle_radius)
     )
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Simulating circular trajectories took {duration:.4g} seconds")
 
     # Allocate a buffer for the detectors' positions
     detector_positions = np.zeros(shape=(1024, 3), dtype=np.float64)
@@ -256,18 +269,49 @@ if __name__ == "__main__":
 
     frequency = omega_laser
 
+    print("Computing (n_0, r_0(t)) dot products")
+
+    start_time = perf_counter()
+
     n_0s_dot_r_0s = np.vecdot(n_0s[:, :, np.newaxis, :], r_0s)
     g = frequency * timestamps - frequency / c * n_0s_dot_r_0s
 
     exponent = 1j * g
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing exponents took {duration:.4g} seconds")
+
+    start_time = perf_counter()
+
+    n_0s_dot_v_0s = np.gradient(n_0s_dot_r_0s, axis=-1)
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing velocities took {duration:.4g} seconds")
+
+    start_time = perf_counter()
+
     oscillatory_kernel = np.exp(exponent)
-    integrand = oscillatory_kernel * np.gradient(n_0s_dot_r_0s, axis=0)
+    integrand = oscillatory_kernel * n_0s_dot_v_0s
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing integrands took {duration:.4g} seconds")
+
+    start_time = perf_counter()
 
     # Approximate integral using Riemann sum
     result = (1 / x_0s_norms) * dt * np.sum(integrand, axis=-1)
 
     # Sum across particles
     result = np.sum(result, axis=-1)
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing integrals using Riemann sums took {duration:.4g} seconds")
+
+    print("Plotting results")
 
     plt.title("Integration results")
 
