@@ -1,0 +1,12 @@
+[project]
+name = "electrodynamics-simulations"
+version = "0.1.0"
+description = "Numerical solutions of the classical electrodynamics equations."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "cupy>=13.6.0",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.1",
+    "pykeops>=2.3",
+]

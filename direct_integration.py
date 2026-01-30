@@ -1,104 +1,12 @@
 from pathlib import Path
 from time import perf_counter
-from typing import NamedTuple
 
 import numpy as np
-import numpy.typing as npt
 import matplotlib.pyplot as plt
 
-
-type Array = npt.NDArray[np.float64]
-
-
-### Physical constants (in atomic units)
-# Speed of light
-c = 137.036
-
-# Angular frequency of laser radiation (we assume it's monochromatic)
-omega_laser = 0.057
-
-# Wavelength of laser radiation
-lmbd = c * (2 * np.pi / omega_laser)
-# print("Lambda:", lmbd)
-
-# Number of particles (electrons) to simulate
-num_particles = 30
-
-particle_indices = np.arange(num_particles, dtype=np.int32)
-
-
-class CircularTrajectories(NamedTuple):
-    integration_duration: float
-    timestamps: Array
-    centers: Array
-    trajectories: Array
-
-
-def simulate_circular_trajectories(
-    # Radius of the large circle around which the particle's center are positioned.
-    large_circle_radius,
-    # How many timestamps to use (will affect trajectory sampling frequency)
-    num_timestamps=4096,
-) -> CircularTrajectories:
-    """Code to numerically compute the particle's trajectories.
-
-    They move around in a small circular trajectory around a center of motion,
-    and these centers are radially distributed around the origin.
-    """
-
-    # Determine the particles' center-of-motion
-    centers = np.array(
-        (
-            large_circle_radius * np.cos(2 * np.pi * particle_indices / num_particles),
-            large_circle_radius * np.sin(2 * np.pi * particle_indices / num_particles),
-            np.zeros(num_particles),
-        )
-    ).T
-
-    trajectories = np.empty((num_particles, num_timestamps, 3))
-
-    # Determine for how long the simulation/numerical integration will run
-    # We'll use an integer multiple of the laser pulse's period
-    num_periods = 40
-    integration_duration = num_periods * (2 * np.pi) / omega_laser
-    timestamps = np.linspace(0, integration_duration, num_timestamps)
-
-    # We apply a decay to the trajectories to ensure the integral decays near the boundaries
-    slope = 20
-    cutoff = np.exp(-1 / (timestamps / slope + 1e-10) ** 2) * np.exp(
-        -1 / (((integration_duration - timestamps) / slope + 1e-10) ** 2)
-    )
-
-    trajectory_radius = 0.75 * lmbd
-    amplitude = trajectory_radius * cutoff
-
-    # Compute instantaneous velocities and make sure we don't go faster than the speed of light
-    # (this might happen if we set a trajectory with too large a circumference)
-    assert np.all(amplitude / (2 * np.pi / omega_laser) < c), (
-        "Particles move faster than speed of light"
-    )
-
-    num_wraps = 1
-    phi_0 = particle_indices * num_wraps * (2 * np.pi) / num_particles
-
-    trajectories[:, :, 0] = centers[:, 0, np.newaxis] + (
-        amplitude
-        * np.cos(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
-    )
-
-    trajectories[:, :, 1] = centers[:, 1, np.newaxis] + (
-        amplitude
-        * np.sin(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
-    )
-
-    # max_vertical_offset = 0
-    max_vertical_offset = 2 * trajectory_radius
-
-    rng = np.random.default_rng(42)
-    vertical_offsets = rng.uniform(low=0, high=max_vertical_offset, size=num_particles)
-    trajectories[:, :, 2] = vertical_offsets[:, np.newaxis]
-
-    return CircularTrajectories(integration_duration, timestamps, centers, trajectories)
+from electrodynamics.constants import num_particles, c, omega_laser, lmbd
+from electrodynamics.trajectories import simulate_circular_trajectories
+from electrodynamics.utils import Array
 
 
 def plot_configuration(trajectories: Array, detector_positions: Array) -> None:
@@ -131,6 +39,8 @@ def plot_configuration(trajectories: Array, detector_positions: Array) -> None:
 if __name__ == "__main__":
     plots_dir = Path(__file__).parent / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
+
+    initial_time = perf_counter()
 
     print("Computing electron trajectories")
 
@@ -274,6 +184,7 @@ if __name__ == "__main__":
     start_time = perf_counter()
 
     n_0s_dot_r_0s = np.vecdot(n_0s[:, :, np.newaxis, :], r_0s)
+
     g = frequency * timestamps - frequency / c * n_0s_dot_r_0s
 
     exponent = 1j * g
@@ -310,6 +221,10 @@ if __name__ == "__main__":
     end_time = perf_counter()
     duration = end_time - start_time
     print(f"Computing integrals using Riemann sums took {duration:.4g} seconds")
+
+    final_time = perf_counter()
+    total_duration = final_time - initial_time
+    print(f"Execution took a total of {total_duration:.3g} seconds")
 
     print("Plotting results")
 
