@@ -1,0 +1,4 @@
+{
+    "editor.formatOnSave": true,
+    "basedpyright.analysis.typeCheckingMode": "basic"
+}

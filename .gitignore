@@ -5,4 +5,10 @@ __pycache__/
 *.py[co]
 
 # Ignore generated and saved figures
+*.png
+*.jpg
+*.jpeg
 *.pdf
+
+# MacOS-generated files
+**/.DS_Store
