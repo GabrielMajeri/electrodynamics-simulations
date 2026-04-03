@@ -2,7 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from electrodynamics.beams import (
+    compute_electric_and_magnetic_field_for_gaussian_beam,
     compute_electric_and_magnetic_field_for_laguerre_gauss_beam,
+    compute_electric_and_magnetic_field_for_plane_wave,
 )
 from electrodynamics.initial_conditions import generate_initial_positions_on_disk
 from electrodynamics.iterate import iterate_initial_conditions_hamiltonian_system
@@ -27,7 +29,7 @@ def main() -> int:
 
     rng = np.random.default_rng(seed=17)
     radius = 5
-    num_particles = 32
+    num_particles = 1024
     initial_positions = generate_initial_positions_on_disk(rng, radius, num_particles)
 
     # Plot initial electron positions, for debugging purposes
@@ -41,6 +43,8 @@ def main() -> int:
     )
 
     initial_velocities = np.zeros((num_particles, 4), dtype=np.float64)
+    # Initial gamma = 0 (since particles are at rest)
+    initial_velocities[:, 0] = 1
 
     # TODO: pick some realistic values
     particle_charge = 1
@@ -51,21 +55,30 @@ def main() -> int:
 
     minkowski_metric = np.diag(np.array((1, -1, -1, -1), dtype=np.float64))
 
+    # beam_type = "plane_wave"
+    # beam_type = "gaussian"
+    beam_type = "laguerre_gauss"
+
     def acceleration(q: RealArray, p: RealArray) -> RealArray:
         laboratory_time = q[:, 0]
         position_vectors = q[:, 1:4]
 
-        # E, B = compute_electric_and_magnetic_field_for_plane_wave(
-        #     position_vectors, laboratory_time
-        # )
+        if beam_type == "plane_wave":
+            E, B = compute_electric_and_magnetic_field_for_plane_wave(
+                position_vectors, laboratory_time
+            )
+        elif beam_type == "gaussian":
+            E, B = compute_electric_and_magnetic_field_for_gaussian_beam(
+                position_vectors, laboratory_time
+            )
+        elif beam_type == "laguerre_gauss":
+            E, B = compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
+                position_vectors, laboratory_time, l=azimuthal_index, p=radial_index
+            )
+        else:
+            raise NotImplementedError(f"unsupported beam type '{beam_type}'")
 
-        # E, B = compute_electric_and_magnetic_field_for_gaussian_beam(
-        #     position_vectors, laboratory_time
-        # )
-
-        E, B = compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
-            position_vectors, laboratory_time, l=azimuthal_index, p=radial_index
-        )
+        # print(E, B)
 
         field_tensor = compute_electromagnetic_field_tensor(E, B)
 
@@ -95,6 +108,29 @@ def main() -> int:
         final_positions[:, 0] * final_velocities[:, 1]
         - final_positions[:, 1] * final_velocities[:, 0]
     )
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 6))
+
+    for index in range(1):
+        axes[0].plot(times, positions[:, index, 0], label="$t$")
+        axes[0].plot(times, positions[:, index, 1], label="$x$")
+        axes[0].plot(times, positions[:, index, 2], label="$y$")
+        axes[0].plot(times, positions[:, index, 3], label="$z$")
+
+        axes[1].plot(times, velocities[:, index, 0], label="$c \\gamma$")
+        axes[1].plot(times, velocities[:, index, 1], label="$v_x$")
+        axes[1].plot(times, velocities[:, index, 2], label="$v_y$")
+        axes[1].plot(times, velocities[:, index, 3], label="$v_z$")
+
+    axes[0].grid()
+    axes[0].legend()
+    axes[0].set_xlabel("Proper time")
+
+    axes[1].grid()
+    axes[1].legend()
+    axes[1].set_xlabel("Proper time")
+
+    fig.savefig("plots/electron_trajectories.pdf")
 
     plot_angular_momentum_distribution(
         initial_positions[:, 1:4], angular_momentum_along_z_axis

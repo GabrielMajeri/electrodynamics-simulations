@@ -1,4 +1,7 @@
 {
     "editor.formatOnSave": true,
-    "basedpyright.analysis.typeCheckingMode": "basic"
+    "basedpyright.analysis.typeCheckingMode": "basic",
+    "explorer.autoRevealExclude": {
+        "**/.venv": true
+    }
 }
