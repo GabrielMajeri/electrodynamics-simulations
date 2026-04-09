@@ -163,7 +163,7 @@ def compute_electric_and_magnetic_field_for_gaussian_beam(
 
 def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     positions: RealArray,
-    time: RealArray,
+    time: float | RealArray,
     l: int,
     p: int,
 ) -> tuple[RealArray, RealArray]:
@@ -207,6 +207,7 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     coefficients = (
         (waist_radius / w_z)
         * np.pow(np.sqrt(2) * r / w_z, abs(l))
+        # TODO: use a faster approximation of 1F1
         * sp.special.hyp1f1(-p, abs(l) + 1, 2 * r_squared_over_w_z_squared)
         * np.exp(-r_squared_over_w_z_squared)
         * np.exp(
