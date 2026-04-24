@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 import scipy as sp
 
+from electrodynamics.constants import c
+
 from .typing import ComplexArray, RealArray
 
 
@@ -13,7 +15,7 @@ class PolarizationVector:
 
     def __init__(self, x: complex, y: complex):
         if not np.isclose(abs(x) ** 2 + abs(y) ** 2, 1):
-            raise ValueError("|x|^2 + |y|^2 must be equal/close to 1")
+            raise ValueError("|x|^2 + |y|^2 must be approximately equal to 1")
 
         self.x = x
         self.y = y
@@ -68,6 +70,8 @@ def compute_electric_and_magnetic_field_for_plane_wave(
     k = 1.0
     omega = 1.0
 
+    # TODO: polarization
+
     E_x = E_0 * np.cos(k * z - omega * time)
     E_y = np.zeros_like(E_x)
     E_z = np.zeros_like(E_x)
@@ -89,7 +93,7 @@ def compute_electric_and_magnetic_field_for_plane_wave(
 
 
 def compute_electric_and_magnetic_field_for_gaussian_beam(
-    positions: RealArray, time: RealArray
+    polarization: PolarizationVector, positions: RealArray, time: RealArray
 ) -> tuple[RealArray, RealArray]:
     assert positions.shape[-1] == 3, "Positions must be 3D vectors"
 
@@ -103,9 +107,6 @@ def compute_electric_and_magnetic_field_for_gaussian_beam(
 
     # Frequency / angular speed
     omega = 1.0
-
-    # TODO: implement polarization support
-    polarization = 1.0
 
     wavelength = 1
 
@@ -139,9 +140,8 @@ def compute_electric_and_magnetic_field_for_gaussian_beam(
         )
     )
 
-    # TODO: handle polarization
-    E_x = amplitude * polarization * coefficients
-    E_y = np.zeros_like(E_x)
+    E_x = polarization.x * amplitude * coefficients
+    E_y = polarization.y * amplitude * coefficients
     # TODO: better approximation formula for computing derivatives in the paraxial approximation
     E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)
 
@@ -158,10 +158,14 @@ def compute_electric_and_magnetic_field_for_gaussian_beam(
 
 
 def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
+    amplitude: float,
+    waist_radius: float,
+    wavelength: float,
+    radial_index: int,
+    azimuthal_index: int,
+    polarization: PolarizationVector,
     positions: RealArray,
     time: float | RealArray,
-    l: int,
-    p: int,
 ) -> tuple[RealArray, RealArray]:
     assert positions.shape[-1] == 3, "Positions must be 3D vectors"
 
@@ -171,62 +175,54 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     phi = np.arctan2(y, x)
     z = positions[:, 2]
 
-    # E_0
-    amplitude = 1.0
-
-    # Frequency / angular speed
-    omega = 1.0
-
-    # TODO: implement polarization support
-    polarization = 1.0
-
-    wavelength = 1
-
     # w_0 = w(0)
-    waist_radius = 2 * wavelength
-    refractive_index = 1.0
-    rayleigh_range = (np.pi * waist_radius**2 * refractive_index) / wavelength
-    w_z = waist_radius * np.sqrt(1 + (z / rayleigh_range) ** 2)
+    rayleigh_length = (np.pi * waist_radius**2) / wavelength
+    # FWHM
+    w_z = waist_radius * np.sqrt(1 + (z / rayleigh_length) ** 2)
+
+    omega = c * (2 * np.pi) / wavelength
 
     # k
-    wave_number = (2 * np.pi * refractive_index) / wavelength
+    wave_number = (2 * np.pi) / wavelength
     # R(z)
     zero_z = np.isclose(z, 0)
     curvature_radius = np.where(
-        zero_z, np.inf, z * (1 + np.square(rayleigh_range / np.where(zero_z, 1, z)))
+        zero_z, np.inf, z * (1 + np.square(rayleigh_length / np.where(zero_z, 1, z)))
     )
 
-    gouy_phase = np.arctan(z / rayleigh_range)
+    gouy_phase = np.arctan(z / rayleigh_length)
 
     r_over_wz_all_squared = (r / w_z) ** 2
 
     coefficients = (
-        (waist_radius / w_z)
-        * np.pow(np.sqrt(2) * r / w_z, abs(l))
+        sp.special.poch((radial_index + 1), abs(azimuthal_index))
+        * (waist_radius / w_z)
+        * np.pow(np.sqrt(2) * r / w_z, abs(azimuthal_index))
         # TODO: use a faster approximation of 1F1
-        * sp.special.hyp1f1(-p, abs(l) + 1, 2 * r_over_wz_all_squared)
+        * sp.special.hyp1f1(
+            -radial_index, abs(azimuthal_index) + 1, 2 * r_over_wz_all_squared
+        )
         * np.exp(-r_over_wz_all_squared)
         * np.exp(
             -1j
             * (
                 wave_number * z
                 + wave_number * (r**2) / (2 * curvature_radius)
-                + l * phi
-                - (2 * p + abs(l) + 1) * gouy_phase
+                + azimuthal_index * phi
+                - (2 * radial_index + abs(azimuthal_index) + 1) * gouy_phase
             )
             + 1j * omega * time
         )
     )
 
-    # TODO: handle polarization
-    E_x = amplitude * polarization * coefficients
-    E_y = np.zeros_like(E_x)
+    E_x = polarization.x * amplitude * coefficients
+    E_y = polarization.y * amplitude * coefficients
+
     # TODO: better approximation formula for computing derivatives in the paraxial approximation
     E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)
 
     E = np.real(np.stack((E_x, E_y, E_z), axis=-1)).astype(np.float64)
 
-    c = 1.0
     B_x = -E_y / c
     B_y = E_x / c
     B_z = 1j / (omega * w_z**2) * (y * E_x - x * E_y)

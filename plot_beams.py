@@ -5,9 +5,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from electrodynamics.beams import (
+    PolarizationVector,
     compute_electric_and_magnetic_field_for_laguerre_gauss_beam,
     compute_gaussian_beam_electric_field,
 )
+from electrodynamics.constants import lmbd
 from electrodynamics.typing import RealArray
 
 
@@ -118,7 +120,7 @@ def main() -> int:
     )
 
     parser.add_argument(
-        "--beam-type", default="gaussian", choices=["gaussian", "laguerre-gauss"]
+        "--beam-type", default="laguerre-gauss", choices=["gaussian", "laguerre-gauss"]
     )
 
     args = parser.parse_args()
@@ -157,11 +159,11 @@ def main() -> int:
     elif beam_type == "laguerre-gauss":
         print("Making plots for Laguerre-Gauss beam")
 
-        nx = 128
-        ny = 128
+        nx = 256
+        ny = 256
 
-        xs = np.linspace(-5, 5, nx)
-        ys = np.linspace(-5, 5, ny)
+        xs = np.linspace(-4e6, 4e6, nx)
+        ys = np.linspace(-4e6, 4e6, ny)
         X, Y = np.meshgrid(xs, ys, indexing="ij", sparse=False)
 
         positions = np.vstack((X.ravel(), Y.ravel())).T
@@ -169,19 +171,30 @@ def main() -> int:
             (positions, np.zeros((positions.shape[0], 1), dtype=np.float64)), axis=1
         )
 
+        wavelength = lmbd
+        waist_radius = 75 * wavelength
+        radial_index = 2
+        azimuthal_index = -2
+        polarization = PolarizationVector(1, 0)
         time = 0
-        azimuthal_index = 1
-        radial_index = 0
 
         electric_field, _magnetic_field = (
             compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
-                positions, time, azimuthal_index, radial_index
+                amplitude=1,
+                waist_radius=waist_radius,
+                wavelength=wavelength,
+                radial_index=radial_index,
+                azimuthal_index=azimuthal_index,
+                polarization=polarization,
+                positions=positions,
+                time=time,
             )
         )
 
         plot_laguerre_gauss_beam_electric_field_cross_section(
             positions[:, 0].reshape(nx, ny),
             positions[:, 1].reshape(nx, ny),
+            # np.real(electric_field[:, 1]).reshape(nx, ny),
             np.linalg.vector_norm(electric_field, axis=-1).reshape(nx, ny),
             azimuthal_index,
             radial_index,

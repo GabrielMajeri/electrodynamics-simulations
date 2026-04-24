@@ -2,10 +2,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from electrodynamics.beams import (
+    PolarizationVector,
     compute_electric_and_magnetic_field_for_gaussian_beam,
     compute_electric_and_magnetic_field_for_laguerre_gauss_beam,
     compute_electric_and_magnetic_field_for_plane_wave,
 )
+from electrodynamics.constants import c, lmbd, omega_laser
 from electrodynamics.initial_conditions import generate_initial_positions_on_disk
 from electrodynamics.iterate import iterate_initial_conditions_hamiltonian_system
 from electrodynamics.plotting import (
@@ -28,7 +30,7 @@ def main() -> int:
     #     - Momentum distribution at the end (i.e. histogram of the velocities)
 
     rng = np.random.default_rng(seed=17)
-    radius = 4
+    radius = 250 * lmbd
     num_particles = 16384
     initial_positions = generate_initial_positions_on_disk(rng, radius, num_particles)
 
@@ -47,7 +49,7 @@ def main() -> int:
     initial_velocities[:, 0] = 1
 
     # TODO: pick some realistic values
-    particle_charge = 1
+    particle_charge = -1
     particle_mass = 1
 
     azimuthal_index = -2
@@ -59,24 +61,63 @@ def main() -> int:
     # beam_type = "gaussian"
     beam_type = "laguerre_gauss"
 
+    def cutoff(phi: RealArray, phi_0: float, tau_0: float) -> RealArray:
+        return np.exp(-(((phi - phi_0) / tau_0) ** 2))
+
+    tau_0 = 10 / omega_laser
+    # tau_0 = 100 / omega_laser
+    print("Tau 0 =", tau_0)
+    phi_0 = 3 * tau_0
+    integration_time = 6 * tau_0
+    print("Integration time:", integration_time)
+
+    phi = np.linspace(0, integration_time, 128, dtype=np.float64)
+
+    plt.figure()
+    plt.plot(phi, cutoff(phi, phi_0=phi_0, tau_0=tau_0))
+    plt.savefig("plots/cutoff.pdf")
+    plt.close()
+
+    a_0 = 1e-2
+    amplitude = a_0 * c * omega_laser
+    # polarization = PolarizationVector(1, 0)
+    polarization = PolarizationVector(1 / np.sqrt(2), 1j / np.sqrt(2))
+    wavelength = lmbd
+    waist_radius = 75 * wavelength
+
     def acceleration(q: RealArray, p: RealArray) -> RealArray:
         laboratory_time = q[:, 0]
         position_vectors = q[:, 1:4]
 
         if beam_type == "plane_wave":
             E, B = compute_electric_and_magnetic_field_for_plane_wave(
-                position_vectors, laboratory_time
+                positions=position_vectors,
+                time=laboratory_time,
             )
         elif beam_type == "gaussian":
             E, B = compute_electric_and_magnetic_field_for_gaussian_beam(
-                position_vectors, laboratory_time
+                polarization=polarization,
+                positions=position_vectors,
+                time=laboratory_time,
             )
         elif beam_type == "laguerre_gauss":
             E, B = compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
-                position_vectors, laboratory_time, l=azimuthal_index, p=radial_index
+                amplitude=amplitude,
+                waist_radius=waist_radius,
+                wavelength=wavelength,
+                radial_index=radial_index,
+                azimuthal_index=azimuthal_index,
+                polarization=polarization,
+                positions=position_vectors,
+                time=laboratory_time,
             )
         else:
             raise NotImplementedError(f"unsupported beam type '{beam_type}'")
+
+        cut = cutoff(laboratory_time - position_vectors[:, 2] / c, phi_0, tau_0)
+        cut = cut.reshape(-1, 1)
+        E *= cut
+        B *= cut
 
         # print(E, B)
 
@@ -98,7 +139,11 @@ def main() -> int:
         return acceleration
 
     times, positions, velocities = iterate_initial_conditions_hamiltonian_system(
-        acceleration, initial_positions, initial_velocities, integration_time=10
+        acceleration,
+        initial_positions,
+        initial_velocities,
+        integration_time=integration_time,
+        time_step=5,
     )
 
     final_positions = positions[-1, :, 1:4]
@@ -112,7 +157,7 @@ def main() -> int:
     fig, axes = plt.subplots(1, 2, figsize=(10, 6))
 
     for index in range(1):
-        axes[0].plot(times, positions[:, index, 0], label="$t$")
+        # axes[0].plot(times, positions[:, index, 0], label="$t$")
         axes[0].plot(times, positions[:, index, 1], label="$x$")
         axes[0].plot(times, positions[:, index, 2], label="$y$")
         axes[0].plot(times, positions[:, index, 3], label="$z$")
@@ -132,8 +177,10 @@ def main() -> int:
 
     fig.savefig("plots/electron_trajectories.pdf")
 
+    print("Maximum angular momentum:", angular_momentum_along_z_axis.max())
+
     plot_angular_momentum_distribution(
-        initial_positions[:, 1:4], angular_momentum_along_z_axis
+        initial_positions[:, 1:4], waist_radius, angular_momentum_along_z_axis
     )
 
     return 0

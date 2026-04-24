@@ -1,3 +1,4 @@
+import numpy as np
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
@@ -23,22 +24,40 @@ def plot_particle_positions(fig: Figure, positions: RealArray) -> None:
 
 
 def plot_angular_momentum_distribution(
-    initial_positions: RealArray, momenta: RealArray
+    initial_positions: RealArray, waist_radius: float, momenta: RealArray
 ) -> None:
+    print("Plotting angular momentum distribution of initial conditions")
+
     fig = plt.figure(dpi=200)
 
     ax = fig.add_subplot()
 
     ax.set_title("Normalized angular momentum distribution")
 
-    p = ax.scatter(initial_positions[:, 0], initial_positions[:, 1], c=momenta, s=3)
+    momenta /= momenta.max()
+
+    momenta = np.ma.masked_where(np.abs(momenta) < 1e-2, momenta)
+    initial_positions = np.ma.masked_array(
+        initial_positions, mask=np.repeat(momenta.mask.reshape(-1, 1), 3, axis=1)
+    )
+
+    momenta = np.ma.compress_nd(momenta, axis=0)
+    initial_positions = np.ma.compress_nd(initial_positions, axis=0)
+
+    p = ax.scatter(
+        initial_positions[:, 0] / waist_radius,
+        initial_positions[:, 1] / waist_radius,
+        c=momenta,
+        cmap="coolwarm",
+        s=3,
+    )
 
     # ax.pcolormesh(Z, R, np.real(electric_field), vmin=-1, vmax=1.0, cmap="coolwarm")
 
     fig.colorbar(p)
 
-    ax.set_xlabel("$x$")
-    ax.set_ylabel("$y$")
+    ax.set_xlabel("$x/w_0$")
+    ax.set_ylabel("$y/w_0$")
 
     ax.set_aspect(1)
 
