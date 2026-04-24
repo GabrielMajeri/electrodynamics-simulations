@@ -27,7 +27,6 @@ def compute_gaussian_beam_electric_field(
     Z: RealArray,
     amplitude: float,
     wavelength: float,
-    polarization: PolarizationVector,
 ) -> ComplexArray:
     # w_0 = w(0)
     waist_radius = 2 * wavelength
@@ -44,7 +43,7 @@ def compute_gaussian_beam_electric_field(
 
     coefficients = (
         (waist_radius / w_z)
-        * np.exp(-(R**2) / (w_z**2))
+        * np.exp(-((R / w_z) ** 2))
         * np.exp(
             -1j
             * (
@@ -53,12 +52,9 @@ def compute_gaussian_beam_electric_field(
                 - gouy_phase
             )
         )
-    )
+    ).astype(np.complex128)
 
-    polarization_array = polarization.to_numpy_array()
-    polarization_array = polarization_array.reshape(2, 1, 1)
-
-    return amplitude * polarization_array * coefficients
+    return amplitude * coefficients
 
 
 def compute_electric_and_magnetic_field_for_plane_wave(
@@ -171,7 +167,7 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
 
     x = positions[:, 0]
     y = positions[:, 1]
-    r = np.sqrt(np.square(x) + np.square(y))
+    r = np.hypot(x, y)
     phi = np.arctan2(y, x)
     z = positions[:, 2]
 
@@ -202,14 +198,14 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
 
     gouy_phase = np.arctan(z / rayleigh_range)
 
-    r_squared_over_w_z_squared = (r**2) / (w_z**2)
+    r_over_wz_all_squared = (r / w_z) ** 2
 
     coefficients = (
         (waist_radius / w_z)
         * np.pow(np.sqrt(2) * r / w_z, abs(l))
         # TODO: use a faster approximation of 1F1
-        * sp.special.hyp1f1(-p, abs(l) + 1, 2 * r_squared_over_w_z_squared)
-        * np.exp(-r_squared_over_w_z_squared)
+        * sp.special.hyp1f1(-p, abs(l) + 1, 2 * r_over_wz_all_squared)
+        * np.exp(-r_over_wz_all_squared)
         * np.exp(
             -1j
             * (

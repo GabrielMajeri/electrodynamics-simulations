@@ -28,12 +28,12 @@ def main() -> int:
     #     - Momentum distribution at the end (i.e. histogram of the velocities)
 
     rng = np.random.default_rng(seed=17)
-    radius = 5
-    num_particles = 1024
+    radius = 4
+    num_particles = 16384
     initial_positions = generate_initial_positions_on_disk(rng, radius, num_particles)
 
     # Plot initial electron positions, for debugging purposes
-    fig = plt.figure()
+    fig = plt.figure(figsize=(10, 6))
     fig.suptitle("Initial electron positions")
     plot_particle_positions(fig, initial_positions)
     fig.savefig("plots/initial_electron_positions.pdf")
@@ -43,7 +43,7 @@ def main() -> int:
     )
 
     initial_velocities = np.zeros((num_particles, 4), dtype=np.float64)
-    # Initial gamma = 0 (since particles are at rest)
+    # Initial gamma = 1 (since particles are at rest)
     initial_velocities[:, 0] = 1
 
     # TODO: pick some realistic values

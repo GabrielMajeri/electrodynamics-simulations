@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from electrodynamics.beams import (
-    PolarizationVector,
     compute_electric_and_magnetic_field_for_laguerre_gauss_beam,
     compute_gaussian_beam_electric_field,
 )
@@ -13,21 +12,17 @@ from electrodynamics.typing import RealArray
 
 
 def plot_gaussian_beam_electric_field_intensity(
-    R: RealArray, Z: RealArray, electric_field: RealArray
+    R: RealArray, Z: RealArray, intensity: RealArray
 ) -> None:
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
 
     ax.set_title("Gaussian beam profile")
 
-    # I've tried coloring each face/region based on the complex number's argument,
-    # but it didn't look so good.
-    # colors = plt.get_cmap("coolwarm")(np.angle(electric_field))
-
     ax.plot_surface(
         R,
         Z,
-        np.abs(electric_field),
+        intensity,
         cmap="coolwarm",
         # facecolors=colors,
         linewidth=0.5,
@@ -65,8 +60,8 @@ def plot_gaussian_beam_electric_field_distribution(
     fig.savefig("plots/gaussian_beam_electric_field_distribution.png")
 
 
-def plot_gaussian_beam_electric_field_cross_section(
-    rs: RealArray, zs: RealArray, electric_field: RealArray
+def plot_gaussian_beam_cross_section_intensity(
+    rs: RealArray, zs: RealArray, intensity: RealArray
 ) -> None:
     fig = plt.figure()
 
@@ -76,7 +71,7 @@ def plot_gaussian_beam_electric_field_cross_section(
 
     z_0_index = len(zs) // 2
 
-    ax.plot(rs, np.abs(electric_field[:, z_0_index]))
+    ax.plot(rs, intensity[:, z_0_index])
 
     ax.set_xlabel("$R$")
     ax.set_ylabel("$|I|$")
@@ -130,6 +125,8 @@ def main() -> int:
 
     beam_type = args.beam_type
     if beam_type == "gaussian":
+        print("Making plots for Gaussian beam")
+
         rs = np.linspace(-25, 25, 512)
         zs = np.linspace(-100, 100, 512)
 
@@ -141,24 +138,25 @@ def main() -> int:
         # Lambda
         wavelength = 3
 
-        polarization = PolarizationVector(1.0, 0.0)
-
         electric_field = compute_gaussian_beam_electric_field(
-            R, Z, amplitude, wavelength, polarization
+            R, Z, amplitude, wavelength
         )
 
-        electric_field = np.real(electric_field[0]).squeeze()
+        electric_field_phase = np.real(electric_field)
+        intensity = np.abs(electric_field)
 
         ### Electric field surface plot
-        plot_gaussian_beam_electric_field_intensity(R, Z, electric_field)
+        plot_gaussian_beam_electric_field_intensity(R, Z, intensity)
 
-        ### Gaussian beam cross-sectional profile
-        plot_gaussian_beam_electric_field_cross_section(rs, zs, electric_field)
+        ### Gaussian beam cross-sectional intensity profile
+        plot_gaussian_beam_cross_section_intensity(rs, zs, intensity)
 
         ### Electric field distribution in the r-z plane
-        plot_gaussian_beam_electric_field_distribution(R, Z, electric_field)
+        plot_gaussian_beam_electric_field_distribution(R, Z, electric_field_phase)
 
     elif beam_type == "laguerre-gauss":
+        print("Making plots for Laguerre-Gauss beam")
+
         nx = 128
         ny = 128
 
@@ -172,8 +170,8 @@ def main() -> int:
         )
 
         time = 0
-        azimuthal_index = 2
-        radial_index = 3
+        azimuthal_index = 1
+        radial_index = 0
 
         electric_field, _magnetic_field = (
             compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
