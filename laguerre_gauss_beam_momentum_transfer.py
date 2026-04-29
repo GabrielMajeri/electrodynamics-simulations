@@ -31,7 +31,7 @@ def main() -> int:
 
     rng = np.random.default_rng(seed=17)
     radius = 250 * lmbd
-    num_particles = 16384
+    num_particles = 8192
     initial_positions = generate_initial_positions_on_disk(rng, radius, num_particles)
 
     # Plot initial electron positions, for debugging purposes
@@ -48,7 +48,7 @@ def main() -> int:
     # Initial gamma = 1 (since particles are at rest)
     initial_velocities[:, 0] = 1
 
-    # TODO: pick some realistic values
+    # Electron charge and mass (in "natural" units)
     particle_charge = -1
     particle_mass = 1
 
@@ -79,11 +79,12 @@ def main() -> int:
     plt.close()
 
     a_0 = 1e-2
-    amplitude = a_0 * c * omega_laser
+    # E_0 = a_0 * m_e * c * omega / |q|
+    amplitude = a_0 * particle_mass * c * omega_laser / abs(particle_charge)
     # polarization = PolarizationVector(1, 0)
     polarization = PolarizationVector(1 / np.sqrt(2), 1j / np.sqrt(2))
     wavelength = lmbd
-    waist_radius = 75 * wavelength
+    beam_waist = 75 * wavelength
 
     def acceleration(q: RealArray, p: RealArray) -> RealArray:
         laboratory_time = q[:, 0]
@@ -103,7 +104,7 @@ def main() -> int:
         elif beam_type == "laguerre_gauss":
             E, B = compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
                 amplitude=amplitude,
-                waist_radius=waist_radius,
+                beam_waist=beam_waist,
                 wavelength=wavelength,
                 radial_index=radial_index,
                 azimuthal_index=azimuthal_index,
@@ -143,7 +144,7 @@ def main() -> int:
         initial_positions,
         initial_velocities,
         integration_time=integration_time,
-        time_step=5,
+        time_step=0.1,
     )
 
     final_positions = positions[-1, :, 1:4]

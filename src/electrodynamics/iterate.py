@@ -1,4 +1,5 @@
 import numpy as np
+from tqdm import tqdm
 
 from .integrator import AccelerationFunction, symplectic_4th_order_step
 from .typing import RealArray
@@ -39,7 +40,7 @@ def iterate_initial_conditions_hamiltonian_system(
     )
     velocities[0] = initial_velocities
 
-    for index, _ in enumerate(times[1:], start=1):
+    for index, _ in enumerate(tqdm(times[1:]), start=1):
         q = positions[index - 1]
         p = velocities[index - 1]
 

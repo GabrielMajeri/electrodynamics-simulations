@@ -158,11 +158,17 @@ def compute_electric_and_magnetic_field_for_gaussian_beam(
 
 
 def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
+    # E_0
     amplitude: float,
-    waist_radius: float,
+    # w_0 = w(0)
+    beam_waist: float,
+    # Lambda
     wavelength: float,
+    # p
     radial_index: int,
+    # l (or m)
     azimuthal_index: int,
+    # \xi
     polarization: PolarizationVector,
     positions: RealArray,
     time: float | RealArray,
@@ -176,9 +182,9 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     z = positions[:, 2]
 
     # w_0 = w(0)
-    rayleigh_length = (np.pi * waist_radius**2) / wavelength
+    rayleigh_length = (np.pi * beam_waist**2) / wavelength
     # FWHM
-    w_z = waist_radius * np.sqrt(1 + (z / rayleigh_length) ** 2)
+    w_z = beam_waist * np.sqrt(1 + (z / rayleigh_length) ** 2)
 
     omega = c * (2 * np.pi) / wavelength
 
@@ -195,8 +201,9 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     r_over_wz_all_squared = (r / w_z) ** 2
 
     coefficients = (
-        sp.special.poch((radial_index + 1), abs(azimuthal_index))
-        * (waist_radius / w_z)
+        amplitude
+        * sp.special.poch((radial_index + 1), abs(azimuthal_index))
+        * (beam_waist / w_z)
         * np.pow(np.sqrt(2) * r / w_z, abs(azimuthal_index))
         # TODO: use a faster approximation of 1F1
         * sp.special.hyp1f1(
@@ -215,8 +222,8 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
         )
     )
 
-    E_x = polarization.x * amplitude * coefficients
-    E_y = polarization.y * amplitude * coefficients
+    E_x = polarization.x * coefficients
+    E_y = polarization.y * coefficients
 
     # TODO: better approximation formula for computing derivatives in the paraxial approximation
     E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)

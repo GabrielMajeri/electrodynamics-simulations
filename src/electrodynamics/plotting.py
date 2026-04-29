@@ -38,7 +38,8 @@ def plot_angular_momentum_distribution(
 
     momenta = np.ma.masked_where(np.abs(momenta) < 1e-2, momenta)
     initial_positions = np.ma.masked_array(
-        initial_positions, mask=np.repeat(momenta.mask.reshape(-1, 1), 3, axis=1)
+        initial_positions,
+        mask=np.repeat(np.ma.getmaskarray(momenta).reshape(-1, 1), 3, axis=1),
     )
 
     momenta = np.ma.compress_nd(momenta, axis=0)
