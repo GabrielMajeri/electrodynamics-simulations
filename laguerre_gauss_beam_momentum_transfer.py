@@ -84,7 +84,7 @@ def main() -> int:
     # polarization = PolarizationVector(1, 0)
     polarization = PolarizationVector(1 / np.sqrt(2), 1j / np.sqrt(2))
     wavelength = lmbd
-    beam_waist = 75 * wavelength
+    waist_radius = 75 * wavelength
 
     def acceleration(q: RealArray, p: RealArray) -> RealArray:
         laboratory_time = q[:, 0]
@@ -104,7 +104,7 @@ def main() -> int:
         elif beam_type == "laguerre_gauss":
             E, B = compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
                 amplitude=amplitude,
-                beam_waist=beam_waist,
+                waist_radius=waist_radius,
                 wavelength=wavelength,
                 radial_index=radial_index,
                 azimuthal_index=azimuthal_index,

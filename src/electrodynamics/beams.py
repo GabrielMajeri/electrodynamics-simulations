@@ -161,7 +161,7 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     # E_0
     amplitude: float,
     # w_0 = w(0)
-    beam_waist: float,
+    waist_radius: float,
     # Lambda
     wavelength: float,
     # p
@@ -182,9 +182,9 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     z = positions[:, 2]
 
     # w_0 = w(0)
-    rayleigh_length = (np.pi * beam_waist**2) / wavelength
+    rayleigh_length = (np.pi * waist_radius**2) / wavelength
     # FWHM
-    w_z = beam_waist * np.sqrt(1 + (z / rayleigh_length) ** 2)
+    w_z = waist_radius * np.sqrt(1 + (z / rayleigh_length) ** 2)
 
     omega = c * (2 * np.pi) / wavelength
 
@@ -203,7 +203,7 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     coefficients = (
         amplitude
         * sp.special.poch((radial_index + 1), abs(azimuthal_index))
-        * (beam_waist / w_z)
+        * (waist_radius / w_z)
         * np.pow(np.sqrt(2) * r / w_z, abs(azimuthal_index))
         # TODO: use a faster approximation of 1F1
         * sp.special.hyp1f1(
