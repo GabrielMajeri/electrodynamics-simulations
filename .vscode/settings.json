@@ -3,5 +3,11 @@
     "basedpyright.analysis.typeCheckingMode": "basic",
     "explorer.autoRevealExclude": {
         "**/.venv": true
+    },
+    "github.copilot.enable": {
+        "*": false,
+        "plaintext": false,
+        "markdown": false,
+        "scminput": false
     }
 }
