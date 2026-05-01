@@ -1,5 +1,5 @@
 # Require a relatively modern version of CMake
-cmake_minimum_required(VERSION 4.3)
+cmake_minimum_required(VERSION 4.2)
 
 # Set the name of this project
 project(ElectrodynamicsSimulations)
