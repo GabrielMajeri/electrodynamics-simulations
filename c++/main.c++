@@ -7,6 +7,8 @@
 #include <random>
 #include <vector>
 
+#include <openacc.h>
+
 using Real = double;
 
 /// The mathematical constant $\pi$.
@@ -14,6 +16,7 @@ constexpr Real pi = std::numbers::pi;
 
 /// Speed of light in vacuum (in atomic units it's equal to the fine structure constant).
 constexpr Real c = 137.036;
+#pragma acc declare copyin(c)
 
 /// Set to `true` to enable checking for errors in numerical integration code.
 /// (e.g. check that energy conservation holds, ensure the Lorentz factor is always >= 1,
@@ -41,21 +44,25 @@ struct Acceleration
     Real dgamma, dvx, dvy, dvz;
 };
 
+#pragma acc routine seq
 static Acceleration operator*(Real scalar, Acceleration acc)
 {
     return Acceleration{scalar * acc.dgamma, scalar * acc.dvx, scalar * acc.dvy, scalar * acc.dvz};
 }
 
+#pragma acc routine seq
 static Momentum operator+(Momentum m, Acceleration acc)
 {
     return Momentum{m.gamma + acc.dgamma, m.vx + acc.dvx, m.vy + acc.dvy, m.vz + acc.dvz};
 }
 
+#pragma acc routine seq
 static Momentum operator*(Real scalar, Momentum m)
 {
     return Momentum{scalar * m.gamma, scalar * m.vx, scalar * m.vy, scalar * m.vz};
 }
 
+#pragma acc routine seq
 static Position operator+(Position p, Momentum m)
 {
     return Position{p.t + m.gamma, p.x + m.vx, p.y + m.vy, p.z + m.vz};
@@ -72,6 +79,7 @@ struct Vector3D
     }
 };
 
+#pragma acc routine seq
 static Vector3D operator*(Real scalar, Vector3D v)
 {
     return Vector3D{scalar * v.x, scalar * v.y, scalar * v.z};
@@ -99,8 +107,14 @@ public:
     {
     }
 
-    const std::complex<Real> get_x() const noexcept { return x; }
-    const std::complex<Real> get_y() const noexcept { return y; }
+    const std::complex<Real> get_x() const noexcept
+    {
+        return x;
+    }
+    const std::complex<Real> get_y() const noexcept
+    {
+        return y;
+    }
 
     static const PolarizationVector linear, right_circular, left_circular;
 };
@@ -141,10 +155,14 @@ static std::pair<std::vector<Position>, std::vector<Momentum>> integrate_traject
     Real integration_start_time, Real integration_end_time,
     Real time_step);
 
+#pragma acc routine seq
 static std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     LaguerreGaussBeamParameters parameters, Vector3D position, Real time);
+#pragma acc routine seq
 static Real laguerre_polynomial(uint32_t n, Real alpha, Real x);
+#pragma acc routine seq
 static Real cutoff(Real phi, Real phi_0, Real tau_0);
+#pragma acc routine seq
 static Acceleration compute_acceleration(
     Momentum previous_momentum, Real charge_to_mass_ratio,
     Vector3D electric_field, Vector3D magnetic_field);
@@ -213,13 +231,8 @@ int main()
     const auto initial_electron_momenta = generate_initial_electron_momenta(num_electrons);
 
     const LaguerreGaussBeamParameters beam_parameters{
-        amplitude,
-        polarization,
-        waist_radius,
-        lambda,
-        omega,
-        radial_index,
-        azimuthal_index};
+        amplitude, polarization, waist_radius, lambda,
+        omega, radial_index, azimuthal_index};
 
     constexpr auto tau_0 = 10 / omega;
     constexpr auto phi_0 = 3 * tau_0;
@@ -230,16 +243,18 @@ int main()
 
     start = std::chrono::steady_clock::now();
 
-    const auto [final_positions, final_momenta] = integrate_trajectories(
-        beam_parameters, charge_to_mass_ratio,
-        phi_0, tau_0,
-        initial_electron_positions, initial_electron_momenta,
-        start_time, end_time, time_step);
+    const auto [final_positions, final_momenta] =
+        integrate_trajectories(
+            beam_parameters, charge_to_mass_ratio, phi_0, tau_0, initial_electron_positions,
+            initial_electron_momenta, start_time, end_time, time_step);
 
     finish = std::chrono::steady_clock::now();
     elapsed_seconds = finish - start;
 
     std::cout << "Integrating " << num_electrons << " trajectories took " << elapsed_seconds.count() << " seconds" << std::endl;
+
+    // BUGFIX: if I don't shutdown OpenACC explicitly here, it crashes (returns a non-zero exit code) at program exit
+    acc_shutdown(acc_get_device_type());
 
     std::cout << "Computing angular momentum in the z direction for electrons in the final state" << std::endl;
 
@@ -255,6 +270,8 @@ int main()
 
     std::cout << "Writing angular momenta to disk..." << std::endl;
     write_npy_file("angular_momenta.npy", angular_momenta);
+
+    std::cout << "Done" << std::endl;
 
     return 0;
 }
@@ -319,32 +336,49 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
     const Real integration_duration = integration_end_time - integration_start_time;
     const size_t num_steps = integration_duration / time_step;
 
-#pragma omp parallel for
+    const auto device_type = acc_get_device_type();
+    std::cout << "OpenACC device type: ";
+    if (device_type == acc_device_host)
+    {
+        std::cout << "Host (CPU)";
+    }
+    else if (device_type == acc_device_nvidia)
+    {
+        std::cout << "NVIDIA";
+    }
+    else
+    {
+        std::cout << device_type;
+    }
+    std::cout << std::endl;
+
+    Position *positions_arr = positions.data();
+    Momentum *momenta_arr = momenta.data();
+
+    // #pragma omp parallel for
+#pragma acc parallel loop copy(positions_arr[ : num_particles], momenta_arr[ : num_particles])
     for (size_t index = 0; index < num_particles; ++index)
     {
         Real current_time = 0;
 
         for (size_t step = 0; step <= num_steps; ++step)
         {
-            const auto previous_position = positions[index];
+            const auto previous_position = positions_arr[index];
             const auto laboratory_time = previous_position.t;
             const auto position_vector = Vector3D::from_position(previous_position);
 
             // Compute EM field vectors for previous position
             auto [electric_field, magnetic_field] =
-                laguerre_gauss_beam_electric_and_magnetic_field(
-                    parameters, position_vector, laboratory_time);
+                laguerre_gauss_beam_electric_and_magnetic_field(parameters, position_vector, laboratory_time);
 
             const auto cf = cutoff(laboratory_time - previous_position.z / c, phi_0, tau_0);
             electric_field = cf * electric_field;
             magnetic_field = cf * magnetic_field;
 
-            const auto previous_momentum = momenta[index];
+            const auto previous_momentum = momenta_arr[index];
 
             // Symplectic Euler integration step
-            const auto acceleration = compute_acceleration(
-                previous_momentum, charge_to_mass_ratio,
-                electric_field, magnetic_field);
+            const auto acceleration = compute_acceleration(previous_momentum, charge_to_mass_ratio, electric_field, magnetic_field);
             const auto new_momentum = previous_momentum + time_step * acceleration;
             const auto new_position = previous_position + time_step * new_momentum;
 
@@ -365,8 +399,8 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
                 }
             }
 
-            positions[index] = new_position;
-            momenta[index] = new_momentum;
+            positions_arr[index] = new_position;
+            momenta_arr[index] = new_momentum;
         }
 
         current_time += time_step;
@@ -408,6 +442,7 @@ std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     const auto gouy_phase = std::atan2(z, rayleigh_length);
 
     std::complex<Real> magnitude = parameters.amplitude * (parameters.waist_radius / width) * std::pow(std::sqrt(2) * r_over_width, abs_l) * laguerre_polynomial(parameters.radial_index, abs_l, 2 * r_over_width_squared) * std::exp(-r_over_width_squared);
+
     std::complex<Real> phase = std::exp(1i * parameters.angular_velocity * time - 1i * (wavenumber * z + wavenumber * curvature + parameters.azimuthal_index * phi - (2 * parameters.radial_index + abs_l + 1) * gouy_phase));
 
     std::complex<Real> coeff = magnitude * phase;

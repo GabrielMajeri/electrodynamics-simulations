@@ -29,7 +29,15 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         # Treat warnings as errors
         # -Werror
         # Enable OpenMP pragmas support
-        -fopenmp
+        # -fopenmp
+        # Enable OpenACC pragmas support
+        -fopenacc
+        # Ubuntu enables these by default for all C++ compilers;
+        # disable them, since they make no sense on the GPU.
+        -fcf-protection=none
+        -fno-stack-protector
+        # Compile and optimize for native (host) architecture
+        -march=native
         # Enable some optimizations for debug build
         $<$<CONFIG:Debug>:
             -O1
@@ -43,5 +51,7 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
 target_link_options(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
         # Enable OpenMP runtime library support
-        -fopenmp
+        # -fopenmp
+        # Enable OpenACC runtime library support
+        -fopenacc
 )
