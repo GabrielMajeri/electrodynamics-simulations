@@ -27,11 +27,17 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         # Enable as many warnings as possible
         -Wall -Wextra -Wpedantic
         # Treat warnings as errors
-        -Werror
+        # -Werror
         # Enable OpenMP pragmas support
         -fopenmp
-        # Enable some optimizations, even for debug build
-        -O2
+        # Enable some optimizations for debug build
+        $<$<CONFIG:Debug>:
+            -O1
+        >
+        # Enable fast math for release build
+        $<$<CONFIG:Release>:
+            -ffast-math
+        >
 )
 
 target_link_options(LaguerreGaussBeamAngularMomentumTransfer

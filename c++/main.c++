@@ -87,7 +87,11 @@ public:
         : x{x}, y{y}
     {
         Real norm = std::pow(std::abs(x), 2) + std::pow(std::abs(y), 2);
-        assert(std::abs(norm - 1) < 1e-6);
+
+        if (std::abs(norm - 1) > 1e-10)
+        {
+            throw std::invalid_argument("Polarization vector must have norm 1");
+        }
     }
 
     const std::complex<Real> get_x() const noexcept { return x; }
@@ -310,32 +314,12 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
     const Real integration_duration = integration_end_time - integration_start_time;
     const size_t num_steps = integration_duration / time_step;
 
-    std::chrono::duration<double> total_duration_per_batch{};
-
-    // Regularly print status updates
-    const uint32_t print_interval = 100;
-
-    Real current_time = 0;
-    for (size_t step = 0; step <= num_steps; ++step)
-    {
-        if (step % print_interval == 0)
-        {
-            const auto duration_per_step = total_duration_per_batch / print_interval;
-
-            std::cout << "Integration step #" << (step + 1) << " out of " << num_steps << '\n';
-            std::cout << "Iteration speed: about " << duration_per_step.count()
-                      << " seconds per step ("
-                      << total_duration_per_batch << " per batch of "
-                      << print_interval << " steps)"
-                      << std::endl;
-
-            total_duration_per_batch = {};
-        }
-
-        const auto start = std::chrono::steady_clock::now();
-
 #pragma omp parallel for
-        for (size_t index = 0; index < num_particles; ++index)
+    for (size_t index = 0; index < num_particles; ++index)
+    {
+        Real current_time = 0;
+
+        for (size_t step = 0; step <= num_steps; ++step)
         {
             const auto previous_position = positions[index];
             const auto laboratory_time = previous_position.t;
@@ -361,30 +345,24 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
 
             if (check_for_errors)
             {
-                // if (new_momentum.gamma < 1 - error_tolerance)
-                // {
-                //     std::cout << new_momentum.gamma << std::endl;
-                // }
-
-                assert(new_momentum.gamma >= 1 - error_tolerance);
+                if (new_momentum.gamma < 1 - error_tolerance)
+                {
+                    std::cout << "Lorentz factor dropped below unity: " << new_momentum.gamma << std::endl;
+                    std::exit(1);
+                }
 
                 const auto inner_product = acceleration.dvx * previous_momentum.vx + acceleration.dvy * previous_momentum.vy + acceleration.dvz * previous_momentum.vz - acceleration.dgamma * previous_momentum.gamma;
 
-                // if (std::abs(inner_product) > error_tolerance)
-                // {
-                //     std::cout << std::abs(inner_product) << std::endl;
-                // }
-
-                assert(std::abs(inner_product) < error_tolerance);
+                if (std::abs(inner_product) > error_tolerance)
+                {
+                    std::cout << "Inner product is non-zero: " << std::abs(inner_product) << std::endl;
+                    std::exit(1);
+                }
             }
 
             positions[index] = new_position;
             momenta[index] = new_momentum;
         }
-
-        const auto finish = std::chrono::steady_clock::now();
-        const std::chrono::duration<double> elapsed_seconds = finish - start;
-        total_duration_per_batch += elapsed_seconds;
 
         current_time += time_step;
     }

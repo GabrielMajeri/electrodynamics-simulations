@@ -144,7 +144,7 @@ def main() -> int:
         initial_positions,
         initial_velocities,
         integration_time=integration_time,
-        time_step=0.1,
+        time_step=1,
     )
 
     final_positions = positions[-1, :, 1:4]

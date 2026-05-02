@@ -20,4 +20,4 @@ __pycache__/
 **/.DS_Store
 
 # CMake build output directory
-/build
+/build*
