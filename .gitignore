@@ -13,6 +13,9 @@ __pycache__/
 *.jpeg
 *.pdf
 
+# Generated NumPy .npy/.npz files
+*.npy
+
 # MacOS-generated files
 **/.DS_Store
 

@@ -150,7 +150,7 @@ def main() -> int:
     final_positions = positions[-1, :, 1:4]
     final_velocities = velocities[-1, :, 1:4]
 
-    angular_momentum_along_z_axis = azimuthal_index * (
+    angular_momentum_along_z_axis = particle_mass * (
         final_positions[:, 0] * final_velocities[:, 1]
         - final_positions[:, 1] * final_velocities[:, 0]
     )
@@ -180,9 +180,13 @@ def main() -> int:
 
     print("Maximum angular momentum:", angular_momentum_along_z_axis.max())
 
+    fig = plt.figure(dpi=200)
+
     plot_angular_momentum_distribution(
-        initial_positions[:, 1:4], waist_radius, angular_momentum_along_z_axis
+        fig, initial_positions[:, 1:4], waist_radius, angular_momentum_along_z_axis
     )
+
+    fig.savefig("plots/angular_momentum_distribution.png")
 
     return 0
 

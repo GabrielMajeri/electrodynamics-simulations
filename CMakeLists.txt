@@ -30,6 +30,8 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         -Werror
         # Enable OpenMP pragmas support
         -fopenmp
+        # Enable some optimizations, even for debug build
+        -O2
 )
 
 target_link_options(LaguerreGaussBeamAngularMomentumTransfer

@@ -1,6 +1,5 @@
 import numpy as np
 from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
 
 from .typing import RealArray
 
@@ -24,11 +23,9 @@ def plot_particle_positions(fig: Figure, positions: RealArray) -> None:
 
 
 def plot_angular_momentum_distribution(
-    initial_positions: RealArray, waist_radius: float, momenta: RealArray
+    fig: Figure, initial_positions: RealArray, waist_radius: float, momenta: RealArray
 ) -> None:
     print("Plotting angular momentum distribution of initial conditions")
-
-    fig = plt.figure(dpi=200)
 
     ax = fig.add_subplot()
 
@@ -49,7 +46,7 @@ def plot_angular_momentum_distribution(
         initial_positions[:, 0] / waist_radius,
         initial_positions[:, 1] / waist_radius,
         c=momenta,
-        cmap="coolwarm",
+        cmap="bwr",
         s=3,
     )
 
@@ -65,4 +62,3 @@ def plot_angular_momentum_distribution(
     ax.grid()
 
     fig.tight_layout()
-    fig.savefig("plots/angular_momentum_distribution.png")
