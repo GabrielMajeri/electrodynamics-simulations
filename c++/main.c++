@@ -88,10 +88,15 @@ public:
     {
         Real norm = std::pow(std::abs(x), 2) + std::pow(std::abs(y), 2);
 
-        if (std::abs(norm - 1) > 1e-10)
+        if (std::abs(norm - 1) > error_tolerance)
         {
             throw std::invalid_argument("Polarization vector must have norm 1");
         }
+    }
+
+    PolarizationVector(Real x, Real y)
+        : PolarizationVector(std::complex<Real>{x}, std::complex<Real>{y})
+    {
     }
 
     const std::complex<Real> get_x() const noexcept { return x; }
@@ -385,6 +390,7 @@ std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
 
     // r / w(z)
     const Real r_over_width = r / width;
+    const Real r_over_width_squared = std::pow(r_over_width, 2);
 
     // k
     const Real wavenumber = 2 * pi / parameters.wavelength;
@@ -401,7 +407,7 @@ std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     // \psi(z)
     const auto gouy_phase = std::atan2(z, rayleigh_length);
 
-    std::complex<Real> magnitude = parameters.amplitude * (parameters.waist_radius / width) * std::pow(std::sqrt(2) * r_over_width, abs_l) * laguerre_polynomial(parameters.radial_index, abs_l, 2 * std::pow(r_over_width, 2)) * std::exp(-std::pow(r_over_width, 2));
+    std::complex<Real> magnitude = parameters.amplitude * (parameters.waist_radius / width) * std::pow(std::sqrt(2) * r_over_width, abs_l) * laguerre_polynomial(parameters.radial_index, abs_l, 2 * r_over_width_squared) * std::exp(-r_over_width_squared);
     std::complex<Real> phase = std::exp(1i * parameters.angular_velocity * time - 1i * (wavenumber * z + wavenumber * curvature + parameters.azimuthal_index * phi - (2 * parameters.radial_index + abs_l + 1) * gouy_phase));
 
     std::complex<Real> coeff = magnitude * phase;
