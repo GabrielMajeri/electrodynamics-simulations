@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
+from numba import njit
 import numpy as np
-import scipy as sp
 
 from electrodynamics.constants import c
 
@@ -59,12 +59,13 @@ def compute_gaussian_beam_electric_field(
     return amplitude * coefficients
 
 
+@njit
 def compute_electric_and_magnetic_field_for_plane_wave(
-    positions: RealArray, time: RealArray
+    position: RealArray, time: RealArray
 ) -> tuple[RealArray, RealArray]:
-    assert positions.shape[-1] == 3, "Positions must be 3D vectors"
+    assert position.shape[-1] == 3, "Positions must be 3D vectors"
 
-    z = positions[:, 2]
+    z = position[2]
 
     E_0 = 1.0
     k = 1.0
@@ -92,15 +93,16 @@ def compute_electric_and_magnetic_field_for_plane_wave(
     return E, B
 
 
+@njit
 def compute_electric_and_magnetic_field_for_gaussian_beam(
-    polarization: PolarizationVector, positions: RealArray, time: RealArray
+    polarization: ComplexArray, position: RealArray, time: RealArray
 ) -> tuple[RealArray, RealArray]:
-    assert positions.shape[-1] == 3, "Positions must be 3D vectors"
+    assert position.shape[-1] == 3, "Positions must be 3D vectors"
 
-    x = positions[:, 0]
-    y = positions[:, 1]
+    x = position[0]
+    y = position[1]
     r = np.sqrt(np.square(x) + np.square(y))
-    z = positions[:, 2]
+    z = position[2]
 
     # E_0
     amplitude = 1.0
@@ -140,23 +142,24 @@ def compute_electric_and_magnetic_field_for_gaussian_beam(
         )
     )
 
-    E_x = polarization.x * amplitude * coefficients
-    E_y = polarization.y * amplitude * coefficients
+    E_x = polarization[0] * amplitude * coefficients
+    E_y = polarization[1] * amplitude * coefficients
     # TODO: better approximation formula for computing derivatives in the paraxial approximation
     E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)
 
-    E = np.stack((E_x, E_y, E_z), axis=-1).real.astype(np.float64)
+    E = np.real(np.array((E_x, E_y, E_z))).astype(np.float64)
 
     c = 1.0
     B_x = -E_y / c
     B_y = E_x / c
     B_z = 1j / (omega * w_z**2) * (y * E_x - x * E_y)
 
-    B = np.stack((B_x, B_y, B_z), axis=-1).real.astype(np.float64)
+    B = np.real(np.array((B_x, B_y, B_z))).astype(np.float64)
 
     return E, B
 
 
+@njit(cache=True)
 def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     # E_0
     amplitude: float,
@@ -169,17 +172,17 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     # l (or m)
     azimuthal_index: int,
     # \xi
-    polarization: PolarizationVector,
-    positions: RealArray,
-    time: float | RealArray,
+    polarization: ComplexArray,
+    position: RealArray,
+    time: float,
 ) -> tuple[RealArray, RealArray]:
-    assert positions.shape[-1] == 3, "Positions must be 3D vectors"
+    assert position.shape[-1] == 3, "Position must be a 3D vector"
 
-    x = positions[:, 0]
-    y = positions[:, 1]
+    x = position[0]
+    y = position[1]
     r = np.hypot(x, y)
     phi = np.arctan2(y, x)
-    z = positions[:, 2]
+    z = position[2]
 
     # w_0 = w(0)
     rayleigh_length = (np.pi * waist_radius**2) / wavelength
@@ -202,12 +205,10 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
 
     coefficients = (
         amplitude
-        * sp.special.poch((radial_index + 1), abs(azimuthal_index))
         * (waist_radius / w_z)
         * np.pow(np.sqrt(2) * r / w_z, abs(azimuthal_index))
-        # TODO: use a faster approximation of 1F1
-        * sp.special.hyp1f1(
-            -radial_index, abs(azimuthal_index) + 1, 2 * r_over_wz_all_squared
+        * laguerre_polynomial(
+            radial_index, abs(azimuthal_index), 2 * r_over_wz_all_squared
         )
         * np.exp(-r_over_wz_all_squared)
         * np.exp(
@@ -222,18 +223,35 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
         )
     )
 
-    E_x = polarization.x * coefficients
-    E_y = polarization.y * coefficients
+    E_x = polarization[0] * coefficients
+    E_y = polarization[1] * coefficients
 
     # TODO: better approximation formula for computing derivatives in the paraxial approximation
     E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)
 
-    E = np.real(np.stack((E_x, E_y, E_z), axis=-1)).astype(np.float64)
+    E = np.real(np.array((E_x, E_y, E_z))).astype(np.float64)
 
     B_x = -E_y / c
     B_y = E_x / c
     B_z = 1j / (omega * w_z**2) * (y * E_x - x * E_y)
 
-    B = np.real(np.stack((B_x, B_y, B_z), axis=-1)).astype(np.float64)
+    B = np.real(np.array((B_x, B_y, B_z))).astype(np.float64)
 
     return E, B
+
+
+@njit
+def laguerre_polynomial(n: int, alpha: float, x: float) -> float:
+    if n == 0:
+        return 1
+
+    if n == 1:
+        return 1 + alpha - x
+
+    if n == 2:
+        return 0.5 * (pow(x, 2) - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
+
+    return (
+        (2 * n - 1 + alpha - x) * laguerre_polynomial(n - 1, alpha, x)
+        - (n - 1 + alpha) * laguerre_polynomial(n - 2, alpha, x)
+    ) / n
