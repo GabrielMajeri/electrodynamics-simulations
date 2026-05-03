@@ -21,6 +21,12 @@ target_sources(LaguerreGaussBeamAngularMomentumTransfer
 # Use a modern C++ standard
 set_property(TARGET LaguerreGaussBeamAngularMomentumTransfer PROPERTY CXX_STANDARD 20)
 
+set(USE_OPENMP TRUE CACHE BOOL "Enable OpenMP support")
+set(USE_OPENACC FALSE CACHE BOOL "Enable OpenACC support")
+
+message(STATUS "OpenMP support: ${USE_OPENMP}")
+message(STATUS "OpenACC support: ${USE_OPENACC}")
+
 # Compiler flags
 target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
@@ -29,11 +35,15 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         # Treat warnings as errors
         # -Werror
         # Enable OpenMP pragmas support
-        # -fopenmp
+        $<$<BOOL:${USE_OPENMP}>:
+            -fopenmp
+        >
         # Enable OpenACC pragmas support
-        -fopenacc
+        $<$<BOOL:${USE_OPENACC}>:
+            -fopenacc
+        >
         # Ubuntu enables these by default for all C++ compilers;
-        # disable them, since they make no sense on the GPU.
+        # disable them, since they make no sense for HPC code.
         -fcf-protection=none
         -fno-stack-protector
         # Compile and optimize for native (host) architecture
@@ -51,7 +61,11 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
 target_link_options(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
         # Enable OpenMP runtime library support
-        # -fopenmp
+        $<$<BOOL:${USE_OPENMP}>:
+            -fopenmp
+        >
         # Enable OpenACC runtime library support
-        -fopenacc
+        $<$<BOOL:${USE_OPENACC}>:
+            -fopenacc
+        >
 )

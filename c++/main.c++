@@ -7,7 +7,16 @@
 #include <random>
 #include <vector>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#ifdef _OPENACC
 #include <openacc.h>
+#define OPENACC_ROUTINE _Pragma("acc routine seq")
+#else
+#define OPENACC_ROUTINE
+#endif
 
 using Real = double;
 
@@ -16,7 +25,9 @@ constexpr Real pi = std::numbers::pi;
 
 /// Speed of light in vacuum (in atomic units it's equal to the fine structure constant).
 constexpr Real c = 137.036;
+#ifdef _OPENACC
 #pragma acc declare copyin(c)
+#endif
 
 /// Set to `true` to enable checking for errors in numerical integration code.
 /// (e.g. check that energy conservation holds, ensure the Lorentz factor is always >= 1,
@@ -44,25 +55,25 @@ struct Acceleration
     Real dgamma, dvx, dvy, dvz;
 };
 
-#pragma acc routine seq
+OPENACC_ROUTINE
 static Acceleration operator*(Real scalar, Acceleration acc)
 {
     return Acceleration{scalar * acc.dgamma, scalar * acc.dvx, scalar * acc.dvy, scalar * acc.dvz};
 }
 
-#pragma acc routine seq
+OPENACC_ROUTINE
 static Momentum operator+(Momentum m, Acceleration acc)
 {
     return Momentum{m.gamma + acc.dgamma, m.vx + acc.dvx, m.vy + acc.dvy, m.vz + acc.dvz};
 }
 
-#pragma acc routine seq
+OPENACC_ROUTINE
 static Momentum operator*(Real scalar, Momentum m)
 {
     return Momentum{scalar * m.gamma, scalar * m.vx, scalar * m.vy, scalar * m.vz};
 }
 
-#pragma acc routine seq
+OPENACC_ROUTINE
 static Position operator+(Position p, Momentum m)
 {
     return Position{p.t + m.gamma, p.x + m.vx, p.y + m.vy, p.z + m.vz};
@@ -79,7 +90,7 @@ struct Vector3D
     }
 };
 
-#pragma acc routine seq
+OPENACC_ROUTINE
 static Vector3D operator*(Real scalar, Vector3D v)
 {
     return Vector3D{scalar * v.x, scalar * v.y, scalar * v.z};
@@ -155,14 +166,17 @@ static std::pair<std::vector<Position>, std::vector<Momentum>> integrate_traject
     Real integration_start_time, Real integration_end_time,
     Real time_step);
 
-#pragma acc routine seq
+OPENACC_ROUTINE
 static std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     LaguerreGaussBeamParameters parameters, Vector3D position, Real time);
-#pragma acc routine seq
+
+OPENACC_ROUTINE
 static Real laguerre_polynomial(uint32_t n, Real alpha, Real x);
-#pragma acc routine seq
+
+OPENACC_ROUTINE
 static Real cutoff(Real phi, Real phi_0, Real tau_0);
-#pragma acc routine seq
+
+OPENACC_ROUTINE
 static Acceleration compute_acceleration(
     Momentum previous_momentum, Real charge_to_mass_ratio,
     Vector3D electric_field, Vector3D magnetic_field);
@@ -188,6 +202,33 @@ static std::vector<char> &operator+=(std::vector<char> &v, const char *s)
 int main()
 {
     std::cout << "Starting Laguerre-Gauss beam angular momentum transfer simulation code" << std::endl;
+
+#ifdef _OPENMP
+    std::cout << "Using OpenMP with " << omp_get_thread_limit() << " threads" << std::endl;
+#else
+#ifdef _OPENACC
+    std::cout << "Using OpenACC\n";
+
+    const auto device_type = acc_get_device_type();
+    std::cout << "OpenACC device type: ";
+    if (device_type == acc_device_host)
+    {
+        std::cout << "Host (CPU)";
+    }
+    else if (device_type == acc_device_nvidia)
+    {
+        std::cout << "NVIDIA";
+    }
+    else
+    {
+        std::cout << device_type;
+    }
+    std::cout << std::endl;
+
+#else
+    std::cout << "Warning: not using any sort of accelerator or parallelization" << std::endl;
+#endif
+#endif
 
     // constexpr size_t num_electrons = 2 * 1024;
     // constexpr size_t num_electrons = 16 * 1024;
@@ -253,8 +294,10 @@ int main()
 
     std::cout << "Integrating " << num_electrons << " trajectories took " << elapsed_seconds.count() << " seconds" << std::endl;
 
+#ifdef _OPENACC
     // BUGFIX: if I don't shutdown OpenACC explicitly here, it crashes (returns a non-zero exit code) at program exit
     acc_shutdown(acc_get_device_type());
+#endif
 
     std::cout << "Computing angular momentum in the z direction for electrons in the final state" << std::endl;
 
@@ -336,27 +379,16 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
     const Real integration_duration = integration_end_time - integration_start_time;
     const size_t num_steps = integration_duration / time_step;
 
-    const auto device_type = acc_get_device_type();
-    std::cout << "OpenACC device type: ";
-    if (device_type == acc_device_host)
-    {
-        std::cout << "Host (CPU)";
-    }
-    else if (device_type == acc_device_nvidia)
-    {
-        std::cout << "NVIDIA";
-    }
-    else
-    {
-        std::cout << device_type;
-    }
-    std::cout << std::endl;
-
     Position *positions_arr = positions.data();
     Momentum *momenta_arr = momenta.data();
 
-    // #pragma omp parallel for
+#ifdef _OPENMP
+#pragma omp parallel for
+#else
+#ifdef _OPENACC
 #pragma acc parallel loop copy(positions_arr[ : num_particles], momenta_arr[ : num_particles])
+#endif
+#endif
     for (size_t index = 0; index < num_particles; ++index)
     {
         Real current_time = 0;
