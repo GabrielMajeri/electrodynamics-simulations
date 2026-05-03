@@ -1,5 +1,5 @@
 # Require a relatively modern version of CMake
-cmake_minimum_required(VERSION 4.2)
+cmake_minimum_required(VERSION 3.28)
 
 # Set the name of this project
 project(ElectrodynamicsSimulations)
@@ -46,6 +46,7 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         # disable them, since they make no sense for HPC code.
         -fcf-protection=none
         -fno-stack-protector
+        -foffload=nvptx-none
         # Compile and optimize for native (host) architecture
         -march=native
         # Enable some optimizations for debug build
