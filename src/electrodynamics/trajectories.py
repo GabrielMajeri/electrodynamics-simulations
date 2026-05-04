@@ -40,11 +40,13 @@ def simulate_circular_trajectories(
 
     # Determine for how long the simulation/numerical integration will run
     # We'll use an integer multiple of the laser pulse's period
+    # TODO: turn into a configurable parameter
     num_periods = 40
     integration_duration = num_periods * (2 * np.pi) / omega_laser
     timestamps = np.linspace(0, integration_duration, num_timestamps)
 
     # We apply a decay to the trajectories to ensure the integral decays near the boundaries
+    # TODO: turn into a configurable parameter
     slope = 20
     cutoff = np.exp(-1 / (timestamps / slope + 1e-10) ** 2) * np.exp(
         -1 / (((integration_duration - timestamps) / slope + 1e-10) ** 2)
@@ -59,6 +61,7 @@ def simulate_circular_trajectories(
         "Particles move faster than speed of light"
     )
 
+    # TODO: turn into a configurable parameter
     num_wraps = 1
     phi_0 = particle_indices * num_wraps * (2 * np.pi) / num_particles
 
@@ -72,6 +75,7 @@ def simulate_circular_trajectories(
         * np.sin(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
     )
 
+    # TODO: turn into a configurable parameter
     random_vertical_offsets = False
     if random_vertical_offsets:
         max_vertical_offset = 2 * trajectory_radius

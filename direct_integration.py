@@ -31,8 +31,30 @@ def plot_configuration(trajectories: Array, detector_positions: Array) -> None:
     ax.set_xlabel("$x$")
     ax.set_ylabel("$y$")
     ax.set_zlabel("$z$")
+
+    plt.tight_layout()
     plt.savefig("plots/experimental_setup.pdf")
+
     # plt.show()
+    plt.close()
+
+
+def plot_particle_trajectory(
+    particle_displacements: Array, particle_index: int
+) -> None:
+    plt.title(f"$r_0(t)$ for particle #{particle_index + 1}")
+
+    plt.plot(timestamps, particle_displacements[particle_index, :, 0], label="x")
+    plt.plot(timestamps, particle_displacements[particle_index, :, 1], label="y")
+
+    plt.xlabel("Time $t$")
+    plt.ylabel("Displacement")
+
+    plt.legend()
+    plt.grid()
+
+    plt.tight_layout()
+    plt.savefig("plots/particle_trajectory.pdf")
     plt.close()
 
 
@@ -54,7 +76,7 @@ if __name__ == "__main__":
     print(f"Simulating circular trajectories took {duration:.4g} seconds")
 
     # Allocate a buffer for the detectors' positions
-    detector_positions = np.zeros(shape=(1024, 3), dtype=np.float64)
+    detector_positions = np.zeros(shape=(256, 3), dtype=np.float64)
 
     # Linearly displaced detector points
     detector_positions[:, 0] = np.linspace(
@@ -64,40 +86,168 @@ if __name__ == "__main__":
     )
 
     # Radially displaced detector points
-    # phi = np.linspace(0, 2 * np.pi, 1024)
+    # phi = np.linspace(0, 2 * np.pi, 256)
     # detector_positions[:, 0] = 3.8 * large_circle_radius * np.cos(phi)
     # detector_positions[:, 1] = 3.8 * large_circle_radius * np.sin(phi)
 
+    # Offset it to be very high in the Z direction
     detector_positions[:, 2] = 1000 * lmbd
 
     if True:
         plot_configuration(trajectories, detector_positions)
 
-    # Current offset of particle from "center" of its motion
+    # TODO: timings
+
+    # Current offset of particle from "center" of its motion, aka r_0(t)
     particle_displacements = trajectories - centers[:, np.newaxis, :]
-    r_0s = particle_displacements
 
     if True:
-        plt.title("$r_0(t)$ for particle #1")
-        plt.plot(timestamps, particle_displacements[0, :, 0], label="x")
-        plt.plot(timestamps, particle_displacements[0, :, 1], label="y")
-        plt.legend()
-        plt.grid()
-        plt.savefig("plots/particle_trajectory.pdf")
-        plt.close()
+        plot_particle_trajectory(particle_displacements, 0)
+
+    print("x shape:", detector_positions.shape)
+    print("r(t) shape:", particle_displacements.shape)
+    # exit(0)
+
+    # Compute relative trajectories (with respect to each detector positions)
+    # R(x_0, t) = x_0 - r_0(t) = (x - R_0) - (r(t) - R_0) = x - r(t)
+    Rs = (
+        detector_positions[:, np.newaxis, np.newaxis, :]
+        - particle_displacements[np.newaxis, :, :, :]
+    )
+
+    print("R(x_0, t) shape:", Rs.shape)
+
+    R_norms = np.linalg.vector_norm(Rs, axis=-1)
+
+    # Compute relative directions
+    # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
+    ns = Rs / np.expand_dims(R_norms, -1)
+
+    print("n(x_0, t) shape:", ns.shape)
+
+    print()
+    print("Checking for faster-than-light particles...")
+
+    print("r(t_2000) =", particle_displacements[0, 2000, :])
+    print("r(t_2001) =", particle_displacements[0, 2001, :])
+    print(
+        "|dx| = |r(t_2001) - r(t_2000)| =",
+        np.linalg.vector_norm(
+            particle_displacements[0, 2001, :] - particle_displacements[0, 2000, :]
+        ),
+    )
+    print("dt =", timestamps[2001] - timestamps[2000])
+
+    print(
+        "dx/dt =",
+        np.abs(
+            np.linalg.vector_norm(
+                particle_displacements[0, 2000, :] - particle_displacements[0, 2001, :]
+            )
+            / (timestamps[2001] - timestamps[2000])
+        ),
+    )
+
+    print()
+
+    particle_velocities = np.gradient(particle_displacements, timestamps, axis=1)
+
+    print("v(t) shape:", particle_velocities.shape)
+
+    # TODO: fix
+    # assert np.all(particle_velocities <= c), "Particles are moving faster than light!"
+
+    relativistic_factor = particle_velocities / c
+
+    # Construct a cutoff
+    slope = 20
+    cutoff = np.exp(-1 / (timestamps / slope + 1e-10) ** 2) * np.exp(
+        -1 / (((integration_duration - timestamps) / slope + 1e-10) ** 2)
+    )
+
+    # The frequency we are interested in (for which we are computing the Fourier transform)
+    frequency = omega_laser
+
+    print("Computing oscillatory kernel (complex exponential)")
+
+    # exp(i * omega * (t + R(x_0, t)/c))
+    oscillatory_kernel = np.exp(1j * frequency * (timestamps + R_norms / c))
+
+    print("Computing first term of the integrand (1/|R|)")
+
+    # ((i * omega)/c) * (beta(t) - n(x_0, t))/|R(x_0, t)|
+    integrand_first_term = (
+        ((1j * frequency) / c)
+        * (relativistic_factor - ns)
+        / np.expand_dims(R_norms, axis=-1)
+    )
+
+    print("Computing second term of the integrand (1/|R|^2)")
+
+    # n(x_0, t)/|R(x_0, t)|^2
+    integrand_second_term = ns / np.expand_dims(np.square(R_norms), axis=-1)
+
+    print("Summing up results")
+
+    dt = timestamps[1] - timestamps[0]
+
+    # First, sum up along time dimension, to compute integral
+    oscillatory_kernel = np.expand_dims(oscillatory_kernel, axis=-1)
+    first_term = dt * np.sum(
+        oscillatory_kernel * integrand_first_term,
+        # * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
+        axis=-2,
+    )
+    second_term = dt * np.sum(
+        oscillatory_kernel * integrand_second_term,
+        # * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
+        axis=-2,
+    )
+
+    # Now sum up each particle's contribution
+    first_term = np.sum(first_term, axis=-2)
+    second_term = np.sum(second_term, axis=-2)
+
+    final_time = perf_counter()
+    total_duration = final_time - initial_time
+    print(f"Execution took a total of {total_duration:.3g} seconds")
+
+    print("Plotting results")
+
+    # Plot terms' magnitude
+
+    first_term_norms = np.linalg.vector_norm(first_term, axis=-1)
+    second_term_norms = np.linalg.vector_norm(second_term, axis=-1)
+
+    fig, axes = plt.subplots(1, 2, figsize=(8, 5))
+
+    plt.suptitle("Electric field $E(x_0, \\omega)$")
+
+    axes[0].set_title("First term ($1/|R|$)")
+    axes[0].plot(first_term_norms)
+    axes[0].grid()
+    axes[0].set_xlabel("Detector position")
+    axes[0].set_ylabel("Electric vector field norm")
+
+    axes[1].set_title("Second term ($1/|R|^2$)")
+    axes[1].plot(second_term_norms, color="orange")
+    axes[1].grid()
+    axes[1].set_xlabel("Detector position")
+    axes[1].set_ylabel("Electric vector field norm")
+
+    plt.tight_layout()
+    fig.savefig("plots/electric_field_magnitudes.pdf")
+    plt.close()
+
+    exit(0)
+
+    r_0s = particle_displacements
 
     # Compute detector displacement (in each particle frame of reference)
     x_0s = detector_positions[:, np.newaxis, :] - centers[np.newaxis, :, :]
     x_0s_norms = np.linalg.vector_norm(x_0s, axis=-1)
 
-    if False:
-        # Inverse of the distance between the particle's center of motion and the detector
-        # We expand in a Taylor series in terms of this value (should be very small)
-        print("1/|x_0|:", 1 / x_0s_norms[0])
-
     n_0s = x_0s / x_0s_norms[:, :, np.newaxis]
-
-    # print(n_0s[0])
 
     if False:
         frequency = omega_laser * 1.00
@@ -107,6 +257,7 @@ if __name__ == "__main__":
         if False:
             plt.title("$\\frac{d}{dt} \\left(n_0 \\cdot r_0\\right) (t)$")
 
+            # TODO: Need to include timestamps for dt!!
             plt.plot(timestamps, np.gradient(n_0_dot_r_0), label="Derivative")
             plt.axhline(
                 c,
@@ -126,6 +277,7 @@ if __name__ == "__main__":
             plt.close()
 
         # Check again that the exponent doesn't go to 0
+        # TODO: Need to include timestamps for dt!!
         assert np.all(np.abs(np.gradient(n_0_dot_r_0, axis=-1)) < c)
 
         if False:
@@ -156,6 +308,7 @@ if __name__ == "__main__":
             plt.close()
 
         # The integrand is now the oscillatory kernel times the derivative of the position term
+        # TODO: Need to include timestamps for dt!!
         integrand = oscillatory_kernel * np.gradient(n_0_dot_r_0)
 
         if False:
