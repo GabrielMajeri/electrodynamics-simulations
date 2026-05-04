@@ -16,10 +16,9 @@ from electrodynamics.plotting import (
     plot_angular_momentum_distribution,
     plot_particle_positions,
 )
-from electrodynamics.tensor import compute_electromagnetic_field_tensor
 from electrodynamics.typing import RealArray
 
-num_particles = 2 * 1024
+num_particles = 64 * 1024
 
 # Electron charge and mass (in "natural" units)
 particle_charge = -1
@@ -55,20 +54,18 @@ num_integration_steps = int(integration_duration / time_step) + 1
 
 phi_0 = 3 * tau_0
 
-minkowski_metric = np.diag(np.array((1, -1, -1, -1), dtype=np.float64))
-
 
 def main() -> int:
+    print(f"Number of electrons: {num_particles}")
+
     rng = np.random.default_rng(seed=17)
     initial_positions, initial_momenta = generate_initial_conditions(rng)
-
-    print(initial_positions.shape)
 
     # Plot initial electron positions, for debugging purposes
     fig = plt.figure(figsize=(10, 6))
     fig.suptitle("Initial electron positions")
     plot_particle_positions(fig, initial_positions[:, 1:4])
-    fig.savefig("plots/initial_electron_positions.pdf")
+    fig.savefig("plots/initial_electron_positions.png")
 
     print("Tau_0 =", tau_0)
 
@@ -88,7 +85,15 @@ def main() -> int:
     plt.savefig("plots/cutoff.pdf")
     plt.close()
 
-    print("Integrating electron motion in EM field due to laser pulse...")
+    # "Warm up" code
+    print("Integrating a single trajectory to compile and warm up code...")
+    integrate_trajectories(initial_positions[:1], initial_momenta[:1])
+
+    # with open("numba.code", "w") as fout:
+    #     for k, v in integrate_trajectories.inspect_llvm().items():
+    #         print(k, v, file=fout)
+
+    print("Integrating electron motion in EM field produced by laser pulse...")
     start_time = perf_counter()
 
     final_positions, final_momenta = integrate_trajectories(
@@ -143,10 +148,17 @@ def generate_initial_conditions(
 def integrate_trajectories(
     initial_positions: RealArray, initial_momenta: RealArray
 ) -> tuple[RealArray, RealArray]:
+    num_particles = initial_positions.shape[0]
     positions = initial_positions
     momenta = initial_momenta
 
-    for particle_index in prange(initial_positions.shape[0]):
+    charge_to_mass_ratio = particle_charge / particle_mass
+
+    for particle_index in prange(num_particles):
+        acceleration = np.empty((4,), dtype=np.float64)
+        E = np.empty((3,), dtype=np.float64)
+        B = np.empty((3,), dtype=np.float64)
+
         for step in range(num_integration_steps):
             previous_position = positions[particle_index]
             previous_momentum = momenta[particle_index]
@@ -155,18 +167,22 @@ def integrate_trajectories(
             position_vector = previous_position[1:4]
 
             if beam_type == "plane_wave":
-                E, B = compute_electric_and_magnetic_field_for_plane_wave(
+                compute_electric_and_magnetic_field_for_plane_wave(
                     position=position_vector,
                     time=laboratory_time,
+                    E=E,
+                    B=B,
                 )
             elif beam_type == "gaussian":
-                E, B = compute_electric_and_magnetic_field_for_gaussian_beam(
+                compute_electric_and_magnetic_field_for_gaussian_beam(
                     polarization=polarization_arr,
                     position=position_vector,
                     time=laboratory_time,
+                    E=E,
+                    B=B,
                 )
             elif beam_type == "laguerre_gauss":
-                E, B = compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
+                compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
                     amplitude=amplitude,
                     waist_radius=waist_radius,
                     wavelength=wavelength,
@@ -175,20 +191,28 @@ def integrate_trajectories(
                     polarization=polarization_arr,
                     position=position_vector,
                     time=laboratory_time,
+                    E=E,
+                    B=B,
                 )
             else:
                 raise NotImplementedError(f"unsupported beam type '{beam_type}'")
 
-            cut = cutoff(laboratory_time - position_vector[2] / c, phi_0, tau_0)
+            cut = cutoff(laboratory_time - position_vector[3] / c, phi_0, tau_0)
             E *= cut
             B *= cut
 
-            field_tensor = compute_electromagnetic_field_tensor(E, B)
-
-            v_lower_indices = minkowski_metric @ previous_momentum
-
-            acceleration = (particle_charge / particle_mass) * (
-                field_tensor @ v_lower_indices
+            v = previous_momentum
+            acceleration[0] = charge_to_mass_ratio * (
+                v[1] * E[0] / c + v[2] * E[1] / c + v[3] * E[2] / c
+            )
+            acceleration[1] = charge_to_mass_ratio * (
+                v[0] * E[0] / c + v[2] * B[2] - v[3] * B[1]
+            )
+            acceleration[2] = charge_to_mass_ratio * (
+                v[0] * E[1] / c - v[1] * B[2] + v[3] * B[0]
+            )
+            acceleration[3] = charge_to_mass_ratio * (
+                v[0] * E[2] / c + v[1] * B[1] - v[2] * B[0]
             )
 
             # TODO: breaks numba parallelization
@@ -207,7 +231,7 @@ def integrate_trajectories(
     return positions, momenta
 
 
-@njit(cache=True)
+@njit(cache=True, inline="always")
 def cutoff(phi: float | RealArray, phi_0: float, tau_0: float) -> float | RealArray:
     parameter = (phi - phi_0) / tau_0
     argument = -(parameter**2)

@@ -59,10 +59,13 @@ def compute_gaussian_beam_electric_field(
     return amplitude * coefficients
 
 
-@njit
+@njit(cache=True)
 def compute_electric_and_magnetic_field_for_plane_wave(
-    position: RealArray, time: RealArray
-) -> tuple[RealArray, RealArray]:
+    position: RealArray,
+    time: RealArray,
+    E: RealArray,
+    B: RealArray,
+) -> None:
     assert position.shape[-1] == 3, "Positions must be 3D vectors"
 
     z = position[2]
@@ -77,7 +80,9 @@ def compute_electric_and_magnetic_field_for_plane_wave(
     E_y = np.zeros_like(E_x)
     E_z = np.zeros_like(E_x)
 
-    E = np.stack((E_x, E_y, E_z), axis=-1)
+    E[0] = E_x
+    E[1] = E_y
+    E[2] = E_z
 
     B_0 = E_0
 
@@ -85,18 +90,19 @@ def compute_electric_and_magnetic_field_for_plane_wave(
     B_x = np.zeros_like(B_y)
     B_z = np.zeros_like(B_y)
 
-    B = np.stack((B_x, B_y, B_z), axis=-1)
-
-    # print("E =", E[0])
-    # print("B =", B[0])
-
-    return E, B
+    B[0] = B_x
+    B[1] = B_y
+    B[2] = B_z
 
 
-@njit
+@njit(cache=True)
 def compute_electric_and_magnetic_field_for_gaussian_beam(
-    polarization: ComplexArray, position: RealArray, time: RealArray
-) -> tuple[RealArray, RealArray]:
+    polarization: ComplexArray,
+    position: RealArray,
+    time: RealArray,
+    E: RealArray,
+    B: RealArray,
+) -> None:
     assert position.shape[-1] == 3, "Positions must be 3D vectors"
 
     x = position[0]
@@ -147,16 +153,17 @@ def compute_electric_and_magnetic_field_for_gaussian_beam(
     # TODO: better approximation formula for computing derivatives in the paraxial approximation
     E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)
 
-    E = np.real(np.array((E_x, E_y, E_z))).astype(np.float64)
+    E[0] = E_x.real
+    E[1] = E_y.real
+    E[2] = E_z.real
 
-    c = 1.0
     B_x = -E_y / c
     B_y = E_x / c
     B_z = 1j / (omega * w_z**2) * (y * E_x - x * E_y)
 
-    B = np.real(np.array((B_x, B_y, B_z))).astype(np.float64)
-
-    return E, B
+    B[0] = B_x.real
+    B[1] = B_y.real
+    B[2] = B_z.real
 
 
 @njit(cache=True)
@@ -175,7 +182,9 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     polarization: ComplexArray,
     position: RealArray,
     time: float,
-) -> tuple[RealArray, RealArray]:
+    E: RealArray,
+    B: RealArray,
+) -> None:
     assert position.shape[-1] == 3, "Position must be a 3D vector"
 
     x = position[0]
@@ -194,10 +203,15 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     # k
     wave_number = (2 * np.pi) / wavelength
     # R(z)
-    zero_z = np.isclose(z, 0)
-    curvature_radius = np.where(
-        zero_z, np.inf, z * (1 + np.square(rayleigh_length / np.where(zero_z, 1, z)))
-    )
+    if abs(z) < 1e-8:
+        curvature_radius = 0.0
+    else:
+        curvature_radius = z * (1 + np.square(rayleigh_length / z))
+
+    if abs(curvature_radius) < 1e-5:
+        curvature_term = 0
+    else:
+        curvature_term = (r**2) / (2 * curvature_radius)
 
     gouy_phase = np.arctan(z / rayleigh_length)
 
@@ -215,7 +229,7 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
             -1j
             * (
                 wave_number * z
-                + wave_number * (r**2) / (2 * curvature_radius)
+                + wave_number * curvature_term
                 + azimuthal_index * phi
                 - (2 * radial_index + abs(azimuthal_index) + 1) * gouy_phase
             )
@@ -229,18 +243,20 @@ def compute_electric_and_magnetic_field_for_laguerre_gauss_beam(
     # TODO: better approximation formula for computing derivatives in the paraxial approximation
     E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)
 
-    E = np.real(np.array((E_x, E_y, E_z))).astype(np.float64)
+    E[0] = E_x.real
+    E[1] = E_y.real
+    E[2] = E_z.real
 
     B_x = -E_y / c
     B_y = E_x / c
     B_z = 1j / (omega * w_z**2) * (y * E_x - x * E_y)
 
-    B = np.real(np.array((B_x, B_y, B_z))).astype(np.float64)
+    B[0] = B_x.real
+    B[1] = B_y.real
+    B[2] = B_z.real
 
-    return E, B
 
-
-@njit
+@njit(cache=True)
 def laguerre_polynomial(n: int, alpha: float, x: float) -> float:
     if n == 0:
         return 1
