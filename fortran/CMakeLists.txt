@@ -2,12 +2,12 @@
 cmake_minimum_required(VERSION 3.28)
 
 # Set the name of this project
-project(ElectrodynamicsSimulations)
+project(ElectrodynamicsSimulations LANGUAGES Fortran)
 
 # Force-enable compiler color diagnostics
 # (when Ninja it used, it pipes compiler output which hinders automatic tty detection)
 set(GCC_COLOR_DIAGNOSTICS_FLAGS "-fdiagnostics-color")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${GCC_COLOR_DIAGNOSTICS_FLAGS}")
+set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${GCC_COLOR_DIAGNOSTICS_FLAGS}")
 
 # Add an executable for the Laguerre-Gauss beam angular momentum transfer experiment
 add_executable(LaguerreGaussBeamAngularMomentumTransfer)
@@ -15,11 +15,11 @@ add_executable(LaguerreGaussBeamAngularMomentumTransfer)
 # Add source files
 target_sources(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
-        c++/main.c++
+        main.f90 initial_conditions_generation.f90
 )
 
-# Use a modern C++ standard
-set_property(TARGET LaguerreGaussBeamAngularMomentumTransfer PROPERTY CXX_STANDARD 20)
+# Use a modern Fortran standard
+set_property(TARGET LaguerreGaussBeamAngularMomentumTransfer PROPERTY FORTRAN_STANDARD 2008)
 
 set(USE_OPENMP TRUE CACHE BOOL "Enable OpenMP support")
 set(USE_OPENACC FALSE CACHE BOOL "Enable OpenACC support")
@@ -34,6 +34,8 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         -Wall -Wextra -Wpedantic
         # Treat warnings as errors
         # -Werror
+        # Enable backtraces
+        -fbacktrace
         # Enable OpenMP pragmas support
         $<$<BOOL:${USE_OPENMP}>:
             -fopenmp
