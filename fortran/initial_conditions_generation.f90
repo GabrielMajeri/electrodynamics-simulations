@@ -1,16 +1,13 @@
 module initial_conditions_generation
    use iso_fortran_env, only: dp => real64
-   use constants, only: pi
+   use constants, only: num_particles, disk_radius, pi
 
    implicit none (type, external)
 
    integer, parameter :: k = kind(0.0_dp)
 
 contains
-   subroutine generate_initial_conditions(num_particles, disk_radius, initial_positions, initial_momenta)
-      integer, intent(in) :: num_particles
-      real(kind=k), intent(in) :: disk_radius
-
+   subroutine generate_initial_conditions(initial_positions, initial_momenta)
       real(kind=k), dimension(num_particles, 4), allocatable, intent(out) :: &
          initial_positions(:, :), initial_momenta(:, :)
 

@@ -18,8 +18,12 @@ target_sources(LaguerreGaussBeamAngularMomentumTransfer
         main.f90
         constants.f90
         types.f90
+        vector.f90
         initial_conditions_generation.f90
         numpy.f90
+        beam.f90
+        integrate.f90
+        angular_momentum.f90
 )
 
 # Use a modern Fortran standard

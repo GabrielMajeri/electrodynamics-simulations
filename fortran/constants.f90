@@ -5,29 +5,57 @@ module constants
 
    public
 
-   ! Number of electrons
-   integer, parameter :: num_particles = 16 * 1024
+   !> Number of electrons
+   integer, parameter :: num_particles = 2 * 1024
 
-   ! Radial index (parameter "p" in formula)
-   integer, parameter :: radial_index = 2
-
-   ! Circle constant PI
+   !> Circle constant PI
    real(real_kind), parameter :: pi = 4 * atan(1.0)
 
-   ! Speed of light in vacuum (in atomic units) -- basically the same as
-   ! the fine structure constant in this case.
+   !> Speed of light in vacuum (in atomic units) -- basically the same as
+   !> the fine structure constant in this case.
    real(real_kind), parameter :: c = 137.036
 
-   ! Angular velocity of laser beam
+   !> Mass of the electron (in atomic units)
+   real(real_kind), parameter :: particle_mass = 1.0
+
+   !> Charge of the electron (in atomic units)
+   real(real_kind), parameter :: particle_charge = -1.0
+
+   !> Radial index (parameter "p" in formulae)
+   integer, parameter :: radial_index = 2
+
+   !> Azimuthal index (parameter "l" in formulae)
+   integer, parameter :: azimuthal_index = 2
+
+   !> Angular velocity of laser beam
    real(real_kind), parameter :: omega = 0.057
 
-   ! Wavelength of monochromatic laser light (in atomic units)
-   real(real_kind), parameter :: lambda = 2 * pi * c / omega
+   real(real_kind), parameter :: a_0 = 1e-2
+   real(real_kind), parameter :: amplitude = a_0 * particle_mass * c * omega / abs(particle_charge)
 
-   ! Radius at beam waist (z = 0)
+   !> Wavelength of monochromatic laser light (in atomic units)
+   real(real_kind), parameter :: lambda = 2 * pi * c / omega
+   real(real_kind), parameter :: wavelength = lambda
+
+   !> Wavenumber, k
+   real(real_kind), parameter :: wavenumber = 2 * pi / lambda
+
+   !> Radius at beam waist (z = 0)
    real(real_kind), parameter :: waist_radius = 75 * lambda
 
-   ! Radius of disk in which initial conditions lie
-   real(real_kind), parameter :: R_max = (1.75 + radial_index) * waist_radius
+   !> Radius of disk in which initial conditions lie
+   real(real_kind), parameter :: disk_radius = (1.75 + radial_index) * waist_radius
+
+   !> Duration of the laser pulse (Gaussian time envelope)
+   real(real_kind), parameter :: tau_0 = 10 / omega
+   real(real_kind), parameter :: phi_0 = 3 * tau_0
+
+   real(real_kind), parameter :: integration_start_time = 0.0
+   real(real_kind), parameter :: integration_end_time = 10 * tau_0
+   real(real_kind), parameter :: integration_time_step = tau_0 / 2048.0
+   real(real_kind), parameter :: integration_duration = integration_end_time - integration_start_time
+
+   complex(real_kind), parameter :: polarization_x = complex(1/sqrt(2.0_real_kind), 0)
+   complex(real_kind), parameter :: polarization_y = complex(0, 1/sqrt(2.0_real_kind))
 
 end module constants

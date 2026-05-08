@@ -1,1 +1,2 @@
-/build/
+# CMake build output directory
+/build*
