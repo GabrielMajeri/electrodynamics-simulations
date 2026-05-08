@@ -15,7 +15,7 @@ add_executable(LaguerreGaussBeamAngularMomentumTransfer)
 # Add source files
 target_sources(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
-        c++/main.c++
+        main.c++
 )
 
 # Use a modern C++ standard
@@ -57,6 +57,10 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         $<$<CONFIG:Release>:
             -ffast-math
         >
+        # Enable LTO for release build
+        $<$<CONFIG:Release>:
+            -flto
+        >
 )
 
 target_link_options(LaguerreGaussBeamAngularMomentumTransfer
@@ -68,5 +72,9 @@ target_link_options(LaguerreGaussBeamAngularMomentumTransfer
         # Enable OpenACC runtime library support
         $<$<BOOL:${USE_OPENACC}>:
             -fopenacc
+        >
+        # Enable LTO for release build
+        $<$<CONFIG:Release>:
+            -flto
         >
 )

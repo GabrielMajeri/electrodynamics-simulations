@@ -18,6 +18,3 @@ __pycache__/
 
 # MacOS-generated files
 **/.DS_Store
-
-# CMake build output directory
-/build*
