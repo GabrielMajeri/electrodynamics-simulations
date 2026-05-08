@@ -6,7 +6,7 @@ module constants
    public
 
    !> Number of electrons
-   integer, parameter :: num_particles = 2 * 1024
+   integer, parameter :: num_particles = 64 * 1024
 
    !> Circle constant PI
    real(real_kind), parameter :: pi = 4 * atan(1.0)
@@ -51,8 +51,8 @@ module constants
    real(real_kind), parameter :: phi_0 = 3 * tau_0
 
    real(real_kind), parameter :: integration_start_time = 0.0
-   real(real_kind), parameter :: integration_end_time = 10 * tau_0
-   real(real_kind), parameter :: integration_time_step = tau_0 / 2048.0
+   real(real_kind), parameter :: integration_end_time = 6 * tau_0
+   real(real_kind), parameter :: integration_time_step = 1e-1
    real(real_kind), parameter :: integration_duration = integration_end_time - integration_start_time
 
    complex(real_kind), parameter :: polarization_x = complex(1/sqrt(2.0_real_kind), 0)

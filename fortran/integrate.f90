@@ -22,7 +22,8 @@ contains
       integer :: particle_index, step
       real(kind=dp) :: time
 
-      real(kind=dp) :: start_time, end_time, duration
+      integer(kind=selected_int_kind(18)) :: rate, start_time, end_time
+      real(kind=dp) :: duration
 
       type(vec4_t) :: previous_position, previous_momentum, acceleration, &
          new_position, new_momentum
@@ -36,8 +37,13 @@ contains
 
       write(*, '("Starting to integrate trajectories")')
 
-      call cpu_time(start_time)
+      call system_clock(count_rate=rate)
 
+      call system_clock(start_time)
+
+      !$omp parallel private(time, E, B)
+
+      !$omp do
       do particle_index = 1, num_particles
          time = 0.0
          do step = 1, num_integration_steps
@@ -59,13 +65,14 @@ contains
             time = time + integration_time_step
          end do
       end do
+      !$omp end parallel
 
-      call cpu_time(end_time)
+      call system_clock(end_time)
 
-      duration = end_time - start_time
+      duration = real(end_time - start_time, dp)/rate
 
       write(*, '("Done integrating trajectories")')
-      write(*, '("Took ", F8.6, " seconds")') duration
+      write(*, '("Took ", F14.10, " seconds")') duration
 
       final_positions = positions
       final_momenta = momenta
