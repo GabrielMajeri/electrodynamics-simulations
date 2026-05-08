@@ -215,15 +215,14 @@ def integrate_trajectories(
                 v[0] * E[2] / c + v[1] * B[1] - v[2] * B[0]
             )
 
+            new_momentum = previous_momentum + time_step * acceleration
+            new_position = previous_position + time_step * new_momentum
+
             # TODO: breaks numba parallelization
             # (F u, u) should be 0
             # assert np.allclose(
-            #     0,
-            #     np.dot(acceleration, v_lower_indices),
+            #     0, np.dot(acceleration, new_momentum), atol=1e-4, rtol=1e-4
             # )
-
-            new_momentum = previous_momentum + time_step * acceleration
-            new_position = previous_position + time_step * new_momentum
 
             positions[particle_index] = new_position
             momenta[particle_index] = new_momentum

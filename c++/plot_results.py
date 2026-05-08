@@ -14,7 +14,7 @@ initial_positions = np.load("initial_positions.npy")
 final_angular_momenta = np.load("angular_momenta.npy")
 
 
-plots_directory = Path("c++")
+plots_directory = Path("plots")
 plots_directory.mkdir(parents=True, exist_ok=True)
 
 # Plot initial electron positions

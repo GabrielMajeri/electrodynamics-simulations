@@ -279,7 +279,7 @@ int main()
     constexpr auto phi_0 = 3 * tau_0;
 
     constexpr Real start_time = 0.0, end_time = 6 * tau_0;
-    constexpr Real time_step = tau_0 / 2048;
+    constexpr Real time_step = 1e-1;
     std::cout << "Integrating equations of motions from t_0 = " << start_time << " up to t_final = " << end_time << ", with a time step of " << time_step << std::endl;
 
     start = std::chrono::steady_clock::now();
@@ -411,6 +411,7 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
 
             // Symplectic Euler integration step
             const auto acceleration = compute_acceleration(previous_momentum, charge_to_mass_ratio, electric_field, magnetic_field);
+
             const auto new_momentum = previous_momentum + time_step * acceleration;
             const auto new_position = previous_position + time_step * new_momentum;
 
@@ -523,7 +524,7 @@ Acceleration compute_acceleration(Momentum previous_momentum, Real charge_to_mas
     const auto agamma = previous_momentum.vx * electric_field.x / c + previous_momentum.vy * electric_field.y / c + previous_momentum.vz * electric_field.z / c;
     const auto ax = previous_momentum.gamma * electric_field.x / c + previous_momentum.vy * magnetic_field.z - previous_momentum.vz * magnetic_field.y;
     const auto ay = previous_momentum.gamma * electric_field.y / c - previous_momentum.vx * magnetic_field.z + previous_momentum.vz * magnetic_field.x;
-    const auto az = previous_momentum.gamma * electric_field.z / c - previous_momentum.vx * magnetic_field.y - previous_momentum.vy * magnetic_field.x;
+    const auto az = previous_momentum.gamma * electric_field.z / c + previous_momentum.vx * magnetic_field.y - previous_momentum.vy * magnetic_field.x;
 
     const Acceleration acceleration_direction{agamma, ax, ay, az};
     return charge_to_mass_ratio * acceleration_direction;
