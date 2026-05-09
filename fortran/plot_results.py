@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from pathlib import Path
 
 import numpy as np
@@ -10,8 +12,8 @@ from electrodynamics.plotting import (
 )
 
 
-initial_positions = np.load("initial_positions.npy")
-final_angular_momenta = np.load("angular_momenta.npy")
+initial_positions = np.load("initial_positions.npy").T
+final_angular_momenta = np.load("angular_momenta.npy").T
 
 plots_directory = Path("plots")
 plots_directory.mkdir(parents=True, exist_ok=True)

@@ -42,6 +42,8 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         -Wall -Wextra -Wpedantic
         # Treat warnings as errors
         # -Werror
+        # Always include debug symbols
+        -g
         # Enable backtraces
         -fbacktrace
         # Enable OpenMP pragmas support
@@ -67,6 +69,10 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         $<$<CONFIG:Release>:
             -ffast-math
         >
+        # Enable LTO for release build
+        $<$<CONFIG:Release>:
+            -flto
+        >
 )
 
 target_link_options(LaguerreGaussBeamAngularMomentumTransfer
@@ -78,5 +84,9 @@ target_link_options(LaguerreGaussBeamAngularMomentumTransfer
         # Enable OpenACC runtime library support
         $<$<BOOL:${USE_OPENACC}>:
             -fopenacc
+        >
+        # Enable LTO for release build
+        $<$<CONFIG:Release>:
+            -flto
         >
 )

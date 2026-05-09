@@ -21,11 +21,14 @@ module constants
    !> Charge of the electron (in atomic units)
    real(real_kind), parameter :: particle_charge = -1.0
 
+   !> q/m term which shows up in equations of motion
+   real(real_kind), parameter :: charge_to_mass_ratio = particle_charge / particle_mass
+
    !> Radial index (parameter "p" in formulae)
    integer, parameter :: radial_index = 2
 
    !> Azimuthal index (parameter "l" in formulae)
-   integer, parameter :: azimuthal_index = 2
+   integer, parameter :: azimuthal_index = -2
 
    !> Angular velocity of laser beam
    real(real_kind), parameter :: omega = 0.057

@@ -40,6 +40,8 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         -Wall -Wextra -Wpedantic
         # Treat warnings as errors
         # -Werror
+        # Always include debug symbols
+        -g
         # Enable OpenMP pragmas support
         $<$<BOOL:${USE_OPENMP}>:
             -fopenmp

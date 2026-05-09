@@ -37,14 +37,14 @@ contains
 
    end function vec4_to_array
 
-   type(vec4_t) function add_vec4s(lhs, rhs) result(res)
+   type(vec4_t) pure function add_vec4s(lhs, rhs) result(res)
       type(vec4_t), intent(in) :: lhs, rhs
 
       res = vec4_t(lhs%a + rhs%a, lhs%x + rhs%x, lhs%y + rhs%y, lhs%z + rhs%z)
 
    end function add_vec4s
 
-   type(vec4_t) function multiply_vec4_by_scalar(scalar, rhs) result(res)
+   type(vec4_t) pure function multiply_vec4_by_scalar(scalar, rhs) result(res)
       real(kind=dp), intent(in) :: scalar
       type(vec4_t), intent(in) :: rhs
 

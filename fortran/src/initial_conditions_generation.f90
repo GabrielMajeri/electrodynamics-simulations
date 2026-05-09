@@ -8,7 +8,7 @@ module initial_conditions_generation
 
 contains
    subroutine generate_initial_conditions(initial_positions, initial_momenta)
-      real(kind=k), dimension(num_particles, 4), allocatable, intent(out) :: &
+      real(kind=k), dimension(4, num_particles), allocatable, intent(out) :: &
          initial_positions(:, :), initial_momenta(:, :)
 
       integer, allocatable :: seed(:)
@@ -33,8 +33,8 @@ contains
       call random_seed(put=seed)
       write(*, '("Successfully seeded RNG")')
 
-      allocate(initial_positions(num_particles, 4), source=0.0_dp)
-      allocate(initial_momenta(num_particles, 4), source=0.0_dp)
+      allocate(initial_positions(4, num_particles), source=0.0_dp)
+      allocate(initial_momenta(4, num_particles), source=0.0_dp)
 
       disk_radius_squared = disk_radius * disk_radius
 
@@ -45,10 +45,10 @@ contains
          radius = sqrt(u(1) * disk_radius_squared)
          theta = 2 * pi * u(2)
 
-         initial_positions(i, 2) = radius * cos(theta)
-         initial_positions(i, 3) = radius * sin(theta)
+         initial_positions(2, i) = radius * cos(theta)
+         initial_positions(3, i) = radius * sin(theta)
 
-         initial_momenta(i, 1) = 1
+         initial_momenta(1, i) = 1
       end do
 
       call cpu_time(end_time)
