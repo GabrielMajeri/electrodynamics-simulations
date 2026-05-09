@@ -8,7 +8,7 @@ use crate::types::Real;
 pub const RANDOM_SEED: u64 = 1234;
 
 /// Number of particles (electrons) to be simulated.
-pub const NUM_PARTICLES: usize = 4 * 1024;
+pub const NUM_PARTICLES: usize = 64 * 1024;
 
 /// Speed of light in vacuum (in atomic units) -- basically the same as
 /// the fine structure constant in this case.

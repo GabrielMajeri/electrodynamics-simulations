@@ -25,45 +25,69 @@ pub fn integrate_trajectories(initial_conditions: InitialConditions) -> Integrat
 
     assert_eq!(positions.len(), momenta.len());
 
+    let positions_ptr = &mut positions as *mut _ as usize;
+    let momenta_ptr = &mut momenta as *mut _ as usize;
+
     println!(
         "Beginning to integrate trajectories for {} time steps, from {} to {}",
         INTEGRATION_DURATION, INTEGRATION_START_TIME, INTEGRATION_END_TIME
     );
 
-    for particle_index in 0..NUM_PARTICLES {
+    let num_threads = num_cpus::get();
+    println!("Running in parallel on {} cores", num_threads);
+
+    let mut thread_pool = fork_union::spawn(num_threads);
+
+    thread_pool.for_n(NUM_PARTICLES, |prong| {
+        let particle_index = prong.task_index;
+
+        let positions;
+        let momenta;
+
+        unsafe {
+            positions = &mut *(positions_ptr as *mut Vec<Vec4>);
+            momenta = &mut *(momenta_ptr as *mut Vec<Vec4>);
+        }
+
         for _integration_step in 0..NUM_INTEGRATION_STEPS {
             let previous_position = positions[particle_index];
-            let laboratory_time = previous_position.x;
-            let position_vector = vector![
-                previous_position.y,
-                previous_position.z,
-                previous_position.w
-            ];
-
-            // Compute EM field vectors for previous position
-            let (electric_field, magnetic_field) =
-                laguerre_gauss_beam_electric_and_magnetic_field(position_vector, laboratory_time);
-
-            let coeff = temporal_cut_off(laboratory_time - position_vector.z / SPEED_OF_LIGHT);
-
-            let electric_field = coeff * electric_field;
-            let magnetic_field = coeff * magnetic_field;
-
             let previous_momentum = momenta[particle_index];
 
-            // Euler integration step
-            let acceleration =
-                compute_acceleration(previous_momentum, electric_field, magnetic_field);
-
-            let new_momentum = previous_momentum + INTEGRATION_TIME_STEP * acceleration;
-            let new_position = previous_position + INTEGRATION_TIME_STEP * new_momentum;
+            let (new_position, new_momentum) =
+                perform_integration_step(previous_position, previous_momentum);
 
             positions[particle_index] = new_position;
             momenta[particle_index] = new_momentum;
         }
-    }
+    });
 
     IntegrationResult { positions, momenta }
+}
+
+fn perform_integration_step(previous_position: Vec4, previous_momentum: Vec4) -> (Vec4, Vec4) {
+    let laboratory_time = previous_position.x;
+    let position_vector = vector![
+        previous_position.y,
+        previous_position.z,
+        previous_position.w
+    ];
+
+    // Compute EM field vectors for previous position
+    let (electric_field, magnetic_field) =
+        laguerre_gauss_beam_electric_and_magnetic_field(position_vector, laboratory_time);
+
+    let coeff = temporal_cut_off(laboratory_time - position_vector.z / SPEED_OF_LIGHT);
+
+    let electric_field = coeff * electric_field;
+    let magnetic_field = coeff * magnetic_field;
+
+    // Euler integration step
+    let acceleration = compute_acceleration(previous_momentum, electric_field, magnetic_field);
+
+    let new_momentum = previous_momentum + INTEGRATION_TIME_STEP * acceleration;
+    let new_position = previous_position + INTEGRATION_TIME_STEP * new_momentum;
+
+    (new_position, new_momentum)
 }
 
 /// Laser beam envelope (Gaussian shape)
