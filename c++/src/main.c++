@@ -64,7 +64,7 @@ int main()
 
     start = std::chrono::steady_clock::now();
 
-    const auto [final_positions, final_momenta] =
+    const auto integration_result =
         integrate_trajectories(initial_electron_positions, initial_electron_momenta);
 
     finish = std::chrono::steady_clock::now();
@@ -77,12 +77,17 @@ int main()
     acc_shutdown(acc_get_device_type());
 #endif
 
+    std::cout << "Writing emitted electric and magnetic fields to disk..." << std::endl;
+    write_npy_file("detector_positions.npy", integration_result.detector_positions);
+    write_npy_file("electric_field.npy", integration_result.electric_field);
+    write_npy_file("magnetic_field.npy", integration_result.magnetic_field);
+
     std::cout << "Computing angular momentum in the z direction for electrons in the final state" << std::endl;
 
     start = std::chrono::steady_clock::now();
 
     const auto angular_momenta = compute_angular_momenta_in_z_direction(
-        m_e, final_positions, final_momenta);
+        m_e, integration_result.positions, integration_result.momenta);
 
     finish = std::chrono::steady_clock::now();
     elapsed_seconds = finish - start;

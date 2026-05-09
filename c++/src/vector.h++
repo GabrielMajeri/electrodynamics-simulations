@@ -38,11 +38,44 @@ struct Vector3D
 {
     Real x, y, z;
 
-    static Vector3D from_position(const Position &position)
+    static inline Vector3D from_position(const Position &position)
     {
         return Vector3D(position.x, position.y, position.z);
     }
+
+    static inline Vector3D from_momentum(const Momentum &momentum)
+    {
+        return Vector3D(momentum.vx, momentum.vy, momentum.vz);
+    }
+
+    Real norm() const;
+    Vector3D normalized() const;
 };
 
 OPENACC_ROUTINE
+Vector3D operator-(Vector3D v, Vector3D w);
+
+OPENACC_ROUTINE
 Vector3D operator*(Real scalar, Vector3D v);
+
+OPENACC_ROUTINE
+Vector3D operator/(Vector3D v, Real scalar);
+
+struct ComplexVector3D
+{
+    Complex x, y, z;
+
+    static inline ComplexVector3D from(const Vector3D &source)
+    {
+        return {source.x, source.y, source.z};
+    }
+
+    OPENACC_ROUTINE
+    ComplexVector3D &operator+=(ComplexVector3D v) noexcept;
+};
+
+OPENACC_ROUTINE
+ComplexVector3D operator+(ComplexVector3D v, ComplexVector3D w);
+
+OPENACC_ROUTINE
+ComplexVector3D operator*(Complex scalar, ComplexVector3D v);

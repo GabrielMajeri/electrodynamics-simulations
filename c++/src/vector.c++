@@ -1,26 +1,66 @@
 #include "vector.h++"
 
+#include <cmath>
+
 Acceleration operator*(Real scalar, Acceleration acc)
 {
-    return Acceleration{scalar * acc.dgamma, scalar * acc.dvx, scalar * acc.dvy, scalar * acc.dvz};
+    return {scalar * acc.dgamma, scalar * acc.dvx, scalar * acc.dvy, scalar * acc.dvz};
 }
 
 Momentum operator+(Momentum m, Acceleration acc)
 {
-    return Momentum{m.gamma + acc.dgamma, m.vx + acc.dvx, m.vy + acc.dvy, m.vz + acc.dvz};
+    return {m.gamma + acc.dgamma, m.vx + acc.dvx, m.vy + acc.dvy, m.vz + acc.dvz};
 }
 
 Momentum operator*(Real scalar, Momentum m)
 {
-    return Momentum{scalar * m.gamma, scalar * m.vx, scalar * m.vy, scalar * m.vz};
+    return {scalar * m.gamma, scalar * m.vx, scalar * m.vy, scalar * m.vz};
 }
 
 Position operator+(Position p, Momentum m)
 {
-    return Position{p.t + m.gamma, p.x + m.vx, p.y + m.vy, p.z + m.vz};
+    return {p.t + m.gamma, p.x + m.vx, p.y + m.vy, p.z + m.vz};
+}
+
+Real Vector3D::norm() const
+{
+    return std::sqrt(x * x + y * y + z * z);
+}
+
+Vector3D Vector3D::normalized() const
+{
+    return (*this) / norm();
+}
+
+Vector3D operator-(Vector3D v, Vector3D w)
+{
+    return {v.x - w.x, v.y - w.y, v.z - w.z};
 }
 
 Vector3D operator*(Real scalar, Vector3D v)
 {
-    return Vector3D{scalar * v.x, scalar * v.y, scalar * v.z};
+    return {scalar * v.x, scalar * v.y, scalar * v.z};
+}
+
+Vector3D operator/(Vector3D v, Real scalar)
+{
+    return {v.x / scalar, v.y / scalar, v.z / scalar};
+}
+
+ComplexVector3D &ComplexVector3D::operator+=(ComplexVector3D v) noexcept
+{
+    x += v.x;
+    y += v.y;
+    z += v.z;
+    return *this;
+}
+
+ComplexVector3D operator+(ComplexVector3D v, ComplexVector3D w)
+{
+    return {v.x + w.x, v.y + w.y, v.z + w.z};
+}
+
+ComplexVector3D operator*(Complex scalar, ComplexVector3D v)
+{
+    return {scalar * v.x, scalar * v.y, scalar * v.z};
 }

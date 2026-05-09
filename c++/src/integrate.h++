@@ -7,8 +7,22 @@
 #include "beam.h++"
 #include "vector.h++"
 
-std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
+struct IntegrationResult
+{
+    std::vector<Position> positions;
+    std::vector<Momentum> momenta;
+
+    std::vector<Vector3D> detector_positions;
+    std::vector<ComplexVector3D> electric_field;
+    std::vector<ComplexVector3D> magnetic_field;
+};
+
+IntegrationResult integrate_trajectories(
     std::vector<Position> initial_positions, std::vector<Momentum> initial_momenta);
+
+OPENACC_ROUTINE
+std::pair<Position, Momentum> perform_integration_step(
+    Position previous_position, Momentum previous_momentum);
 
 OPENACC_ROUTINE
 Acceleration compute_acceleration(

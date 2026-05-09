@@ -15,9 +15,9 @@ constexpr Real c = 137.036;
 #pragma acc declare copyin(c)
 #endif
 
-// constexpr size_t num_electrons = 2 * 1024;
+constexpr size_t num_electrons = 4 * 1024;
 // constexpr size_t num_electrons = 16 * 1024;
-constexpr std::size_t num_electrons = 64 * 1024;
+// constexpr std::size_t num_electrons = 64 * 1024;
 
 constexpr Real omega = 0.057;
 constexpr Real angular_velocity = omega;
@@ -46,3 +46,6 @@ constexpr auto phi_0 = 3 * tau_0;
 
 constexpr Real integration_start_time = 0.0, integration_end_time = 6 * tau_0;
 constexpr Real integration_time_step = 1e-1;
+
+constexpr std::size_t num_detector_points = 512;
+constexpr Real detector_length = 2500 * lambda;

@@ -1,11 +1,14 @@
 #include "integrate.h++"
 
+#include <complex>
 #include <iostream>
 
 #include "common.h++"
 #include "constants.h++"
 
-std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
+using namespace std::complex_literals;
+
+IntegrationResult integrate_trajectories(
     std::vector<Position> initial_positions, std::vector<Momentum> initial_momenta)
 {
     // Determine number of particles
@@ -19,6 +22,17 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
     const Real integration_duration = integration_end_time - integration_start_time;
     const std::size_t num_steps = integration_duration / integration_time_step;
 
+    std::vector<Vector3D> detector_positions(num_detector_points);
+    constexpr auto detector_z = 1000 * lambda;
+
+    for (std::size_t i = 0; i < num_detector_points; ++i)
+    {
+        const auto x = -detector_length + i * (2 * detector_length) / num_detector_points;
+        detector_positions[i] = {x, 0, detector_z};
+    }
+
+    std::vector<ComplexVector3D> electric_field(num_detector_points), magnetic_field(num_detector_points);
+
     Position *positions_arr = positions.data();
     Momentum *momenta_arr = momenta.data();
 
@@ -29,53 +43,109 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
 #pragma acc parallel loop copy(positions_arr[ : num_particles], momenta_arr[ : num_particles])
 #endif
 #endif
-    for (std::size_t index = 0; index < num_particles; ++index)
+    for (std::size_t particle_index = 0; particle_index < num_particles; ++particle_index)
     {
+        std::vector<ComplexVector3D> particle_electric_field(num_detector_points);
+
+        auto current_time = 0.0;
         for (std::size_t step = 0; step <= num_steps; ++step)
         {
-            const auto previous_position = positions_arr[index];
-            const auto laboratory_time = previous_position.t;
-            const auto position_vector = Vector3D::from_position(previous_position);
+            const auto previous_position = positions_arr[particle_index];
+            const auto previous_momentum = momenta_arr[particle_index];
 
-            // Compute EM field vectors for previous position
-            auto [electric_field, magnetic_field] =
-                laguerre_gauss_beam_electric_and_magnetic_field(position_vector, laboratory_time);
+            const auto [new_position, new_momentum] = perform_integration_step(previous_position, previous_momentum);
 
-            const auto cf = cutoff(laboratory_time - previous_position.z / c, phi_0, tau_0);
-            electric_field = cf * electric_field;
-            magnetic_field = cf * magnetic_field;
-
-            const auto previous_momentum = momenta_arr[index];
-
-            // Symplectic Euler integration step
-            const auto acceleration = compute_acceleration(previous_momentum, electric_field, magnetic_field);
-
-            const auto new_momentum = previous_momentum + integration_time_step * acceleration;
-            const auto new_position = previous_position + integration_time_step * new_momentum;
-
-            if (check_for_errors)
+            for (std::size_t detector_index = 0; detector_index < num_detector_points; ++detector_index)
             {
-                if (new_momentum.gamma < 1 - error_tolerance)
-                {
-                    std::cout << "Lorentz factor dropped below unity: " << new_momentum.gamma << std::endl;
-                    std::exit(1);
-                }
+                const auto particle_position = Vector3D::from_position(new_position);
+                const auto particle_velocity = Vector3D::from_momentum(new_momentum);
 
-                const auto inner_product = acceleration.dvx * previous_momentum.vx + acceleration.dvy * previous_momentum.vy + acceleration.dvz * previous_momentum.vz - acceleration.dgamma * previous_momentum.gamma;
+                // R(x_0, t) = x_0 - r_0(t) = (x - R_0) - (r(t) - R_0) = x - r(t)
+                const auto displacement = detector_positions[detector_index] - particle_position;
+                const auto displacement_norm = displacement.norm();
+                // n(x_0, t) = R(x_0, t)/|R(x_0, t)|
+                const auto view_direction = displacement / displacement_norm;
 
-                if (std::abs(inner_product) > error_tolerance)
-                {
-                    std::cout << "Inner product is non-zero: " << std::abs(inner_product) << std::endl;
-                    std::exit(1);
-                }
+                // exp(i * omega * (t + R(x_0, t)/c))
+                const auto oscillatory_kernel = std::exp(1i * omega * (current_time + displacement_norm / c));
+
+                // v/c
+                const auto beta = particle_velocity / c;
+
+                // O(1/|R|) term
+                // ((i * omega) / c) * (beta(t) - n(x_0, t)) / |R(x_0, t)|
+                const auto first_term = ((1i * omega) / c) * ComplexVector3D::from((beta - view_direction) / displacement_norm);
+
+                // O(1/|R|^2) term
+                // n(x_0, t) / |R(x_0, t)|^2
+                const auto second_term = ComplexVector3D::from(view_direction / (displacement_norm * displacement_norm));
+
+                // Riemann summation
+                particle_electric_field[detector_index] += integration_time_step * oscillatory_kernel * (first_term + second_term);
             }
 
-            positions_arr[index] = new_position;
-            momenta_arr[index] = new_momentum;
+            positions_arr[particle_index] = new_position;
+            momenta_arr[particle_index] = new_momentum;
+
+            current_time += integration_time_step;
+        }
+
+#pragma omp critical
+        {
+            // std::cout << "Adding up contributions from particle with index " << particle_index << std::endl;
+            for (std::size_t detector_index = 0; detector_index < num_detector_points; ++detector_index)
+            {
+                electric_field[detector_index] += particle_electric_field[detector_index];
+            }
         }
     }
 
-    return std::make_pair(positions, momenta);
+    return {
+        positions,
+        momenta,
+        detector_positions,
+        electric_field,
+        magnetic_field,
+    };
+}
+
+std::pair<Position, Momentum> perform_integration_step(Position previous_position, Momentum previous_momentum)
+{
+    const auto laboratory_time = previous_position.t;
+    const auto position_vector = Vector3D::from_position(previous_position);
+
+    // Compute EM field vectors for previous position
+    auto [electric_field, magnetic_field] =
+        laguerre_gauss_beam_electric_and_magnetic_field(position_vector, laboratory_time);
+
+    const auto cf = cutoff(laboratory_time - previous_position.z / c, phi_0, tau_0);
+    electric_field = cf * electric_field;
+    magnetic_field = cf * magnetic_field;
+
+    // Symplectic Euler integration step
+    const auto acceleration = compute_acceleration(previous_momentum, electric_field, magnetic_field);
+
+    const auto new_momentum = previous_momentum + integration_time_step * acceleration;
+    const auto new_position = previous_position + integration_time_step * new_momentum;
+
+    if (check_for_errors)
+    {
+        if (new_momentum.gamma < 1 - error_tolerance)
+        {
+            std::cout << "Lorentz factor dropped below unity: " << new_momentum.gamma << std::endl;
+            std::exit(1);
+        }
+
+        const auto inner_product = acceleration.dvx * previous_momentum.vx + acceleration.dvy * previous_momentum.vy + acceleration.dvz * previous_momentum.vz - acceleration.dgamma * previous_momentum.gamma;
+
+        if (std::abs(inner_product) > error_tolerance)
+        {
+            std::cout << "Inner product is non-zero: " << std::abs(inner_product) << std::endl;
+            std::exit(1);
+        }
+    }
+
+    return std::make_pair(new_position, new_momentum);
 }
 
 Acceleration compute_acceleration(Momentum previous_momentum, Vector3D electric_field, Vector3D magnetic_field)
