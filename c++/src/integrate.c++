@@ -48,7 +48,7 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
             const auto previous_momentum = momenta_arr[index];
 
             // Symplectic Euler integration step
-            const auto acceleration = compute_acceleration(previous_momentum, charge_to_mass_ratio, electric_field, magnetic_field);
+            const auto acceleration = compute_acceleration(previous_momentum, electric_field, magnetic_field);
 
             const auto new_momentum = previous_momentum + integration_time_step * acceleration;
             const auto new_position = previous_position + integration_time_step * new_momentum;
@@ -78,7 +78,7 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
     return std::make_pair(positions, momenta);
 }
 
-Acceleration compute_acceleration(Momentum previous_momentum, Real charge_to_mass_ratio, Vector3D electric_field, Vector3D magnetic_field)
+Acceleration compute_acceleration(Momentum previous_momentum, Vector3D electric_field, Vector3D magnetic_field)
 {
     const auto agamma = previous_momentum.vx * electric_field.x / c + previous_momentum.vy * electric_field.y / c + previous_momentum.vz * electric_field.z / c;
     const auto ax = previous_momentum.gamma * electric_field.x / c + previous_momentum.vy * magnetic_field.z - previous_momentum.vz * magnetic_field.y;

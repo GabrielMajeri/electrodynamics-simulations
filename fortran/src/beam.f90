@@ -62,9 +62,16 @@ contains
       !> \psi(z)
       gouy_phase = atan2(z, rayleigh_length)
 
-      magnitude = amplitude * (waist_radius / width) * ((sqrt(2.0_dp) * r_over_width) ** abs_l) * laguerre_polynomial(radial_index, real(abs_l, kind=dp), 2 * r_over_width_squared) * exp(-r_over_width_squared)
+      magnitude = amplitude * (waist_radius / width) &
+         * ((sqrt(2.0_dp) * r_over_width) ** abs_l) &
+         * laguerre_polynomial(radial_index, real(abs_l, kind=dp), 2 * r_over_width_squared) &
+         * exp(-r_over_width_squared)
 
-      phase = exp(complex(0, 1) * (omega * time - (wavenumber * z + wavenumber * curvature + azimuthal_index * phi - (2 * radial_index + abs_l + 1) * gouy_phase)))
+      phase = exp(complex(0, 1) * ( &
+         omega * time &
+         - (wavenumber * z + wavenumber * curvature + azimuthal_index * phi &
+         - (2 * radial_index + abs_l + 1) * gouy_phase)&
+         ))
 
       coefficient = magnitude * phase
 
@@ -95,7 +102,8 @@ contains
       else if (n == 2) then
          f = 0.5 * (x ** 2 - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
       else
-         f = ((2 * n - 1 + alpha - x) * laguerre_polynomial(n - 1, alpha, x) - (n - 1 + alpha) * laguerre_polynomial(n - 2, alpha, x)) / n
+         f = ((2 * n - 1 + alpha - x) * laguerre_polynomial(n - 1, alpha, x) &
+            - (n - 1 + alpha) * laguerre_polynomial(n - 2, alpha, x)) / n
       end if
 
    end function laguerre_polynomial

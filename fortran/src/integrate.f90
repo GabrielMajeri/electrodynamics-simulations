@@ -1,7 +1,7 @@
 module integrate
    use iso_fortran_env, only: dp => real64
    use constants, only: c, charge_to_mass_ratio, num_particles, &
-      integration_duration, integration_time_step
+      integration_duration, integration_time_step, phi_0, tau_0
    use vector
    use beam, only: compute_laguerre_gauss_beam_electric_and_magnetic_field
 
@@ -64,16 +64,21 @@ contains
       type(vec4_t) :: previous_position, previous_momentum, &
          acceleration, new_position, new_momentum
       type(vec3_t) :: position_vector, E, B
-      real(kind=dp) :: time
+      real(kind=dp) :: laboratory_time, coeff
 
       previous_position = to_vec4(position)
       previous_momentum = to_vec4(momentum)
 
-      time = previous_position%a
+      laboratory_time = previous_position%a
 
       position_vector = vec3_t(previous_position%x, previous_position%y, previous_position%z)
 
-      call compute_laguerre_gauss_beam_electric_and_magnetic_field(position_vector, time, E, B)
+      call compute_laguerre_gauss_beam_electric_and_magnetic_field( &
+         position_vector, laboratory_time, E, B)
+
+      coeff = cutoff(laboratory_time - previous_position%z / c)
+      E = coeff * E
+      B = coeff * B
 
       acceleration = compute_acceleration(previous_momentum, E, B)
 
@@ -100,5 +105,15 @@ contains
          )
 
    end function compute_acceleration
+
+   pure function cutoff(phi)
+      real(kind=dp), intent(in) :: phi
+      real(kind=dp) :: t, cutoff
+
+      t = (phi - phi_0) / tau_0
+
+      cutoff = exp(-t**2)
+
+   end function cutoff
 
 end module integrate

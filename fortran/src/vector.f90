@@ -16,6 +16,7 @@ module vector
    end interface
 
    interface operator(*)
+      procedure :: multiply_vec3_by_scalar
       procedure :: multiply_vec4_by_scalar
    end interface
 
@@ -43,6 +44,14 @@ contains
       res = vec4_t(lhs%a + rhs%a, lhs%x + rhs%x, lhs%y + rhs%y, lhs%z + rhs%z)
 
    end function add_vec4s
+
+   type(vec3_t) pure function multiply_vec3_by_scalar(scalar, rhs) result(res)
+      real(kind=dp), intent(in) :: scalar
+      type(vec3_t), intent(in) :: rhs
+
+      res = vec3_t(scalar * rhs%x, scalar * rhs%y, scalar * rhs%z)
+
+   end function multiply_vec3_by_scalar
 
    type(vec4_t) pure function multiply_vec4_by_scalar(scalar, rhs) result(res)
       real(kind=dp), intent(in) :: scalar

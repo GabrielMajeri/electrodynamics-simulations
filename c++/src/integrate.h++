@@ -12,5 +12,4 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
 
 OPENACC_ROUTINE
 Acceleration compute_acceleration(
-    Momentum previous_momentum, Real charge_to_mass_ratio,
-    Vector3D electric_field, Vector3D magnetic_field);
+    Momentum previous_momentum, Vector3D electric_field, Vector3D magnetic_field);
