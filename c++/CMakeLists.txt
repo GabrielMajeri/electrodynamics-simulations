@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 # Set the name of this project
-project(ElectrodynamicsSimulations)
+project(ElectrodynamicsSimulations CXX)
 
 # Force-enable compiler color diagnostics
 # (when Ninja it used, it pipes compiler output which hinders automatic tty detection)
@@ -15,7 +15,13 @@ add_executable(LaguerreGaussBeamAngularMomentumTransfer)
 # Add source files
 target_sources(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
-        main.c++
+        src/main.c++
+        src/vector.c++
+        src/beam.c++
+        src/polarization.c++
+        src/integrate.c++
+        src/npy_io.c++
+        src/angular_momentum.c++
 )
 
 # Use a modern C++ standard
