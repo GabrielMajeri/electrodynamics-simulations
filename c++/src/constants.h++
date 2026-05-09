@@ -33,7 +33,8 @@ constexpr Real charge_to_mass_ratio = q / m_e;
 
 constexpr Real amplitude = a_0 * m_e * c * omega / std::abs(q);
 // const PolarizationVector polarization = PolarizationVector::linear;
-const PolarizationVector polarization = PolarizationVector::right_circular;
+// const PolarizationVector polarization = PolarizationVector::right_circular;
+const PolarizationVector polarization = PolarizationVector::left_circular;
 
 constexpr std::uint32_t radial_index = 2;
 constexpr std::int32_t azimuthal_index = -2;

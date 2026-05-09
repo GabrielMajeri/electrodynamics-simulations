@@ -6,6 +6,8 @@
 
 using namespace std::complex_literals;
 
+constexpr Real tolerance = 1e-5;
+
 std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     Vector3D position, Real time)
 {
@@ -29,10 +31,10 @@ std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     const int abs_l = std::abs(azimuthal_index);
 
     // R(z)
-    const Real radius_of_curvature = std::abs(z) < 1e-5 ? 0 : z * (1 + std::pow(rayleigh_length / z, 2));
+    const Real radius_of_curvature = std::abs(z) < tolerance ? 0 : z * (1 + std::pow(rayleigh_length / z, 2));
 
     // r^2/(2 * R(z))
-    const Real curvature = radius_of_curvature == 0 ? 0 : std::pow(r, 2) / (2 * radius_of_curvature);
+    const Real curvature = radius_of_curvature < tolerance ? 0 : std::pow(r, 2) / (2 * radius_of_curvature);
 
     // \psi(z)
     const auto gouy_phase = std::atan2(z, rayleigh_length);
@@ -79,5 +81,6 @@ Real laguerre_polynomial(uint32_t n, Real alpha, Real x)
 
 Real cutoff(Real phi, Real phi_0, Real tau_0)
 {
-    return std::exp(-std::pow((phi - phi_0) / tau_0, 2));
+    const auto t = (phi - phi_0) / tau_0;
+    return std::exp(-(t * t));
 }
