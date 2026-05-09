@@ -15,15 +15,15 @@ add_executable(LaguerreGaussBeamAngularMomentumTransfer)
 # Add source files
 target_sources(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
-        main.f90
-        constants.f90
-        types.f90
-        vector.f90
-        initial_conditions_generation.f90
-        numpy.f90
-        beam.f90
-        integrate.f90
-        angular_momentum.f90
+        src/main.f90
+        src/constants.f90
+        src/types.f90
+        src/vector.f90
+        src/initial_conditions_generation.f90
+        src/numpy.f90
+        src/beam.f90
+        src/integrate.f90
+        src/angular_momentum.f90
 )
 
 # Use a modern Fortran standard
