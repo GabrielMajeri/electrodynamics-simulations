@@ -7,27 +7,26 @@
 using namespace std::complex_literals;
 
 std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
-    LaguerreGaussBeamParameters parameters,
     Vector3D position, Real time)
 {
     const Real r = std::hypot(position.x, position.y);
     const Real phi = std::atan2(position.y, position.x);
     const auto [x, y, z] = position;
 
-    const Real rayleigh_length = pi * std::pow(parameters.waist_radius, 2) / parameters.wavelength;
+    const Real rayleigh_length = pi * std::pow(waist_radius, 2) / wavelength;
 
     // w(z)
-    const Real width = parameters.waist_radius * std::sqrt(1 + std::pow(z / rayleigh_length, 2));
+    const Real width = waist_radius * std::sqrt(1 + std::pow(z / rayleigh_length, 2));
 
     // r / w(z)
     const Real r_over_width = r / width;
     const Real r_over_width_squared = std::pow(r_over_width, 2);
 
     // k
-    const Real wavenumber = 2 * pi / parameters.wavelength;
+    const Real wavenumber = 2 * pi / wavelength;
 
     // |l|
-    const int abs_l = std::abs(parameters.azimuthal_index);
+    const int abs_l = std::abs(azimuthal_index);
 
     // R(z)
     const Real radius_of_curvature = std::abs(z) < 1e-5 ? 0 : z * (1 + std::pow(rayleigh_length / z, 2));
@@ -38,21 +37,21 @@ std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     // \psi(z)
     const auto gouy_phase = std::atan2(z, rayleigh_length);
 
-    std::complex<Real> magnitude = parameters.amplitude * (parameters.waist_radius / width) * std::pow(std::sqrt(2) * r_over_width, abs_l) * laguerre_polynomial(parameters.radial_index, abs_l, 2 * r_over_width_squared) * std::exp(-r_over_width_squared);
+    std::complex<Real> magnitude = amplitude * (waist_radius / width) * std::pow(std::sqrt(2) * r_over_width, abs_l) * laguerre_polynomial(radial_index, abs_l, 2 * r_over_width_squared) * std::exp(-r_over_width_squared);
 
-    std::complex<Real> phase = std::exp(1i * parameters.angular_velocity * time - 1i * (wavenumber * z + wavenumber * curvature + parameters.azimuthal_index * phi - (2 * parameters.radial_index + abs_l + 1) * gouy_phase));
+    std::complex<Real> phase = std::exp(1i * (angular_velocity * time - wavenumber * z + wavenumber * curvature + azimuthal_index * phi - (2 * radial_index + abs_l + 1) * gouy_phase));
 
-    std::complex<Real> coeff = magnitude * phase;
+    Complex coeff = magnitude * phase;
 
-    std::complex<Real> E_x = coeff * parameters.polarization.get_x(),
-                       E_y = coeff * parameters.polarization.get_y(),
-                       E_z = 2i / (wavenumber * std::pow(width, 2)) * (x * E_x + y * E_y);
+    Complex E_x = coeff * polarization.get_x(),
+            E_y = coeff * polarization.get_y(),
+            E_z = 2i / (wavenumber * std::pow(width, 2)) * (x * E_x + y * E_y);
 
     Vector3D E = {E_x.real(), E_y.real(), E_z.real()};
 
-    std::complex<Real> B_x = -E_y / c,
-                       B_y = E_x / c,
-                       B_z = 1i / (parameters.angular_velocity * std::pow(width, 2)) * (y * E_x - x * E_y);
+    Complex B_x = -E_y / c,
+            B_y = E_x / c,
+            B_z = 1i / (angular_velocity * std::pow(width, 2)) * (y * E_x - x * E_y);
 
     Vector3D B = {B_x.real(), B_y.real(), B_z.real()};
 

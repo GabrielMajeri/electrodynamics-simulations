@@ -6,11 +6,7 @@
 #include "constants.h++"
 
 std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
-    LaguerreGaussBeamParameters parameters, Real charge_to_mass_ratio,
-    Real phi_0, Real tau_0,
-    std::vector<Position> initial_positions, std::vector<Momentum> initial_momenta,
-    Real integration_start_time, Real integration_end_time,
-    Real time_step)
+    std::vector<Position> initial_positions, std::vector<Momentum> initial_momenta)
 {
     // Determine number of particles
     const std::size_t num_particles = initial_positions.size();
@@ -21,7 +17,7 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
     std::vector<Momentum> momenta = initial_momenta;
 
     const Real integration_duration = integration_end_time - integration_start_time;
-    const std::size_t num_steps = integration_duration / time_step;
+    const std::size_t num_steps = integration_duration / integration_time_step;
 
     Position *positions_arr = positions.data();
     Momentum *momenta_arr = momenta.data();
@@ -35,8 +31,6 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
 #endif
     for (std::size_t index = 0; index < num_particles; ++index)
     {
-        Real current_time = 0;
-
         for (std::size_t step = 0; step <= num_steps; ++step)
         {
             const auto previous_position = positions_arr[index];
@@ -45,7 +39,7 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
 
             // Compute EM field vectors for previous position
             auto [electric_field, magnetic_field] =
-                laguerre_gauss_beam_electric_and_magnetic_field(parameters, position_vector, laboratory_time);
+                laguerre_gauss_beam_electric_and_magnetic_field(position_vector, laboratory_time);
 
             const auto cf = cutoff(laboratory_time - previous_position.z / c, phi_0, tau_0);
             electric_field = cf * electric_field;
@@ -56,8 +50,8 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
             // Symplectic Euler integration step
             const auto acceleration = compute_acceleration(previous_momentum, charge_to_mass_ratio, electric_field, magnetic_field);
 
-            const auto new_momentum = previous_momentum + time_step * acceleration;
-            const auto new_position = previous_position + time_step * new_momentum;
+            const auto new_momentum = previous_momentum + integration_time_step * acceleration;
+            const auto new_position = previous_position + integration_time_step * new_momentum;
 
             if (check_for_errors)
             {
@@ -79,8 +73,6 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
             positions_arr[index] = new_position;
             momenta_arr[index] = new_momentum;
         }
-
-        current_time += time_step;
     }
 
     return std::make_pair(positions, momenta);

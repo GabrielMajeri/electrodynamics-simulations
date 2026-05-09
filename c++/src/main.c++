@@ -58,18 +58,14 @@ int main()
 
     const auto initial_electron_momenta = generate_initial_electron_momenta(num_electrons);
 
-    const LaguerreGaussBeamParameters beam_parameters{
-        amplitude, polarization, waist_radius, lambda,
-        omega, radial_index, azimuthal_index};
-
-    std::cout << "Integrating equations of motions from t_0 = " << start_time << " up to t_final = " << end_time << ", with a time step of " << time_step << std::endl;
+    std::cout << "Integrating equations of motions from t_0 = " << integration_start_time
+              << " up to t_final = " << integration_end_time
+              << ", with a time step of " << integration_time_step << std::endl;
 
     start = std::chrono::steady_clock::now();
 
     const auto [final_positions, final_momenta] =
-        integrate_trajectories(
-            beam_parameters, charge_to_mass_ratio, phi_0, tau_0, initial_electron_positions,
-            initial_electron_momenta, start_time, end_time, time_step);
+        integrate_trajectories(initial_electron_positions, initial_electron_momenta);
 
     finish = std::chrono::steady_clock::now();
     elapsed_seconds = finish - start;

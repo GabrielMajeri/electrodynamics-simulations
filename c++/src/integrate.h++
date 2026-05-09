@@ -8,13 +8,7 @@
 #include "vector.h++"
 
 std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
-    LaguerreGaussBeamParameters parameters,
-    Real charge_to_mass_ratio,
-    Real phi_0, Real tau_0,
-    std::vector<Position> initial_positions,
-    std::vector<Momentum> initial_momenta,
-    Real integration_start_time, Real integration_end_time,
-    Real time_step);
+    std::vector<Position> initial_positions, std::vector<Momentum> initial_momenta);
 
 OPENACC_ROUTINE
 Acceleration compute_acceleration(
