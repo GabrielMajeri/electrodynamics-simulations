@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "common.h++"
 #include "polarization.h++"
 #include "types.h++"
@@ -19,9 +21,9 @@ struct LaguerreGaussBeamParameters
     // \omega
     Real angular_velocity;
     // p
-    uint32_t radial_index;
+    std::uint32_t radial_index;
     // l (or m)
-    int32_t azimuthal_index;
+    std::int32_t azimuthal_index;
 };
 
 OPENACC_ROUTINE
@@ -29,7 +31,7 @@ std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     LaguerreGaussBeamParameters parameters, Vector3D position, Real time);
 
 OPENACC_ROUTINE
-Real laguerre_polynomial(uint32_t n, Real alpha, Real x);
+Real laguerre_polynomial(std::uint32_t n, Real alpha, Real x);
 
 OPENACC_ROUTINE
 Real cutoff(Real phi, Real phi_0, Real tau_0);

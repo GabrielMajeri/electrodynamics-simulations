@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <numbers>
 
 #include "polarization.h++"
@@ -16,7 +17,7 @@ constexpr Real c = 137.036;
 
 // constexpr size_t num_electrons = 2 * 1024;
 // constexpr size_t num_electrons = 16 * 1024;
-constexpr size_t num_electrons = 64 * 1024;
+constexpr std::size_t num_electrons = 64 * 1024;
 
 constexpr Real omega = 0.057;
 constexpr Real lambda = 2 * pi * c / omega;
@@ -32,8 +33,8 @@ constexpr Real amplitude = a_0 * m_e * c * omega / std::abs(q);
 // const PolarizationVector polarization = PolarizationVector::linear;
 const PolarizationVector polarization = PolarizationVector::right_circular;
 
-constexpr uint32_t radial_index = 2;
-constexpr int32_t azimuthal_index = -2;
+constexpr std::uint32_t radial_index = 2;
+constexpr std::int32_t azimuthal_index = -2;
 
 constexpr Real disk_radius = (1.75 + radial_index) * waist_radius;
 

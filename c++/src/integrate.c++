@@ -13,7 +13,7 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
     Real time_step)
 {
     // Determine number of particles
-    const size_t num_particles = initial_positions.size();
+    const std::size_t num_particles = initial_positions.size();
     assert(num_particles == initial_momenta.size());
 
     // Allocate some buffers to store positions/momenta during integration
@@ -21,7 +21,7 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
     std::vector<Momentum> momenta = initial_momenta;
 
     const Real integration_duration = integration_end_time - integration_start_time;
-    const size_t num_steps = integration_duration / time_step;
+    const std::size_t num_steps = integration_duration / time_step;
 
     Position *positions_arr = positions.data();
     Momentum *momenta_arr = momenta.data();
@@ -33,11 +33,11 @@ std::pair<std::vector<Position>, std::vector<Momentum>> integrate_trajectories(
 #pragma acc parallel loop copy(positions_arr[ : num_particles], momenta_arr[ : num_particles])
 #endif
 #endif
-    for (size_t index = 0; index < num_particles; ++index)
+    for (std::size_t index = 0; index < num_particles; ++index)
     {
         Real current_time = 0;
 
-        for (size_t step = 0; step <= num_steps; ++step)
+        for (std::size_t step = 0; step <= num_steps; ++step)
         {
             const auto previous_position = positions_arr[index];
             const auto laboratory_time = previous_position.t;

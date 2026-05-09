@@ -1,5 +1,6 @@
 #include "npy_io.h++"
 
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 
