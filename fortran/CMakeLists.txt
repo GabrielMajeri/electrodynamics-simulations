@@ -38,6 +38,8 @@ message(STATUS "OpenACC support: ${USE_OPENACC}")
 # Compiler flags
 target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
+        # Enable the C preprocessor
+        -cpp
         # Enable as many warnings as possible
         -Wall -Wextra -Wpedantic
         # Treat warnings as errors

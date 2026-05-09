@@ -14,7 +14,7 @@ int main()
     std::cout << "Starting Laguerre-Gauss beam angular momentum transfer simulation code" << std::endl;
 
 #ifdef _OPENMP
-    std::cout << "Using OpenMP with " << omp_get_thread_limit() << " threads" << std::endl;
+    std::cout << "Using OpenMP with up to " << omp_get_num_procs() << " cores" << std::endl;
 #else
 #ifdef _OPENACC
     std::cout << "Using OpenACC\n";

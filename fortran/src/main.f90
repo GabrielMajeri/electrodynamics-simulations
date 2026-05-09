@@ -6,6 +6,10 @@ program laguerre_gauss_beam_angular_momentum_transfer
    use integrate, only : integrate_trajectories
    use angular_momentum, only : compute_angular_momenta_in_z_direction
 
+#ifdef _OPENMP
+   use omp_lib, only: omp_get_num_procs
+#endif
+
    implicit none (type, external)
 
    real(real_kind), dimension(4, num_particles), allocatable :: &
@@ -13,6 +17,10 @@ program laguerre_gauss_beam_angular_momentum_transfer
       final_positions(:, :), final_momenta(:, :)
 
    real(real_kind), dimension(num_particles), allocatable :: angular_momenta(:)
+
+#ifdef _OPENMP
+   write (*, '("Using OpenMP on up to ", I0, " processors")') omp_get_num_procs()
+#endif
 
    ! Generate initial positions and initial momenta
    call generate_initial_conditions(initial_positions, initial_momenta)
