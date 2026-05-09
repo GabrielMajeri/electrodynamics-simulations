@@ -21,7 +21,6 @@ contains
       integer, parameter :: num_integration_steps = ceiling(integration_duration / integration_time_step)
 
       integer :: particle_index, step
-      real(kind=dp) :: time
 
       integer(kind=selected_int_kind(18)) :: rate, start_time, end_time
       real(kind=dp) :: duration
@@ -38,13 +37,11 @@ contains
 
       call system_clock(start_time)
 
-      !$omp parallel private(time)
+      !$omp parallel
       !$omp do
       do particle_index = 1, num_particles
-         time = 0.0
          do step = 1, num_integration_steps
-            call perform_integration_step(time, positions(1:4, particle_index), momenta(1:4, particle_index))
-            time = time + integration_time_step
+            call perform_integration_step(positions(1:4, particle_index), momenta(1:4, particle_index))
          end do
       end do
       !$omp end parallel
@@ -61,16 +58,18 @@ contains
 
    end subroutine integrate_trajectories
 
-   pure subroutine perform_integration_step(time, position, momentum)
-      real(kind=dp), intent(in) :: time
+   pure subroutine perform_integration_step(position, momentum)
       real(kind=dp), intent(inout) :: position(1:4), momentum(1:4)
 
       type(vec4_t) :: previous_position, previous_momentum, &
          acceleration, new_position, new_momentum
       type(vec3_t) :: position_vector, E, B
+      real(kind=dp) :: time
 
       previous_position = to_vec4(position)
       previous_momentum = to_vec4(momentum)
+
+      time = previous_position%a
 
       position_vector = vec3_t(previous_position%x, previous_position%y, previous_position%z)
 
