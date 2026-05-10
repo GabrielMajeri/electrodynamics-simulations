@@ -7,6 +7,11 @@ __pycache__/
 # Installed Python module files
 *.egg-info
 
+# Compiled binary files
+*.exe
+*.o
+*.obj
+
 # Ignore generated and saved figures
 *.png
 *.jpg
