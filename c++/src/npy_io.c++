@@ -78,7 +78,7 @@ void write_npy_file(const char *file_path, const std::vector<T> &array)
     {
         dictionary.push_back(' ');
         ++dictionary_length;
-    } while ((fixed_header_length + dictionary_length) % 16 != 0);
+    } while ((fixed_header_length + dictionary_length) % 64 != 0);
 
     dictionary.back() = '\n';
 

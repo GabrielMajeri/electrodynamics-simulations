@@ -1,0 +1,10 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "electrodynamics-simulations:lib"
+
+    - path: "./app/Main.hs"
+      component: "electrodynamics-simulations:exe:electrodynamics-simulations-exe"
+
+    - path: "./app/Paths_electrodynamics_simulations.hs"
+      component: "electrodynamics-simulations:exe:electrodynamics-simulations-exe"
