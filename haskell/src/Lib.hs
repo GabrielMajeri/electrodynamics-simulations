@@ -20,30 +20,72 @@ import Constants
     waistRadius,
     wavelength,
   )
-import Data.Complex (Complex ((:+)), realPart)
+import Data.Complex (Complex ((:+)))
 import Data.Vector.Unboxed (Vector)
 import Data.Vector.Unboxed qualified as VU
 import Linear (V3 (V3), V4 (V4))
 import Types (AngularMomentum (AngularMomentum), Momentum (Momentum), Position (Position), RealT, Vec3, Vec4)
 
+data FieldConstants = FieldConstants
+  { fcWavenumber :: !RealT,
+    fcWaistRadiusSquared :: !RealT,
+    fcRayleighLength :: !RealT,
+    fcAbsL :: !Integer,
+    fcSqrt2 :: !RealT,
+    fcAmplitudeByWaist :: !RealT
+  }
+  deriving (Show)
+
 integrateTrajectories :: (Vector Position, Vector Momentum) -> (Vector Position, Vector Momentum)
 integrateTrajectories (initialPositions, initialMomenta) =
   let variables = VU.zip initialPositions initialMomenta
-      finalVariables = VU.map (\state -> iterate integrationStep state !! numIntegrationSteps) variables
+      !fieldConsts = precomputeFieldConstants
+      finalVariables = VU.map (integrateNSteps fieldConsts numIntegrationSteps) variables
    in VU.unzip finalVariables
 
-integrationStep :: (Position, Momentum) -> (Position, Momentum)
-integrationStep (!position, !momentum) =
+precomputeFieldConstants :: FieldConstants
+precomputeFieldConstants =
+  let wn = 2 * pi / wavelength
+      wrs = waistRadius * waistRadius
+      rl = pi * wrs / wavelength
+      absL = abs azimuthalIndex
+      sq2 = sqrt 2
+      abw = amplitude * waistRadius
+   in FieldConstants wn wrs rl absL sq2 abw
+
+integrateNSteps :: FieldConstants -> Int -> (Position, Momentum) -> (Position, Momentum)
+integrateNSteps fc n0 !state0 = go n0 state0
+  where
+    go 0 !s = s
+    go k !s = go (k - 1) (integrationStep fc s)
+
+integrationStep :: FieldConstants -> (Position, Momentum) -> (Position, Momentum)
+integrationStep fc (!position, !momentum) =
   let (Position positionVector) = position
       (V4 laboratoryTime x y z) = positionVector
-      (e, b) = computeLaguerreGaussElectricAndMagneticField (V3 x y z) laboratoryTime
+      (e, b) = computeLaguerreGaussElectricAndMagneticField fc (V3 x y z) laboratoryTime
       coeff = cutOff (laboratoryTime - z / c)
-      eMod = fmap (* coeff) e
-      bMod = fmap (* coeff) b
+      V3 ex ey ez = e
+      V3 bx by bz = b
+      !eMod = V3 (coeff * ex) (coeff * ey) (coeff * ez)
+      !bMod = V3 (coeff * bx) (coeff * by) (coeff * bz)
       (Momentum momentumVector) = momentum
       acceleration = computeAcceleration momentumVector eMod bMod
-      newMomentumVector = momentumVector + (fmap (* integrationTimeStep) acceleration)
-      newPositionVector = positionVector + (fmap (* integrationTimeStep) newMomentumVector)
+      V4 gamma px py pz = momentumVector
+      V4 agamma ax ay az = acceleration
+      !newMomentumVector =
+        V4
+          (gamma + integrationTimeStep * agamma)
+          (px + integrationTimeStep * ax)
+          (py + integrationTimeStep * ay)
+          (pz + integrationTimeStep * az)
+      V4 newGamma newPx newPy newPz = newMomentumVector
+      !newPositionVector =
+        V4
+          (laboratoryTime + integrationTimeStep * newGamma)
+          (x + integrationTimeStep * newPx)
+          (y + integrationTimeStep * newPy)
+          (z + integrationTimeStep * newPz)
    in (Position newPositionVector, Momentum newMomentumVector)
 
 cutOff :: RealT -> RealT
@@ -54,68 +96,64 @@ cutOff !phi = exp (-t ^ (2 :: Int))
 tolerance :: RealT
 tolerance = 1e-8
 
-computeLaguerreGaussElectricAndMagneticField :: Vec3 -> RealT -> (Vec3, Vec3)
-computeLaguerreGaussElectricAndMagneticField !(V3 x y z) time =
-  let r = sqrt (x ^ (2 :: Int) + y ^ (2 :: Int))
+computeLaguerreGaussElectricAndMagneticField :: FieldConstants -> Vec3 -> RealT -> (Vec3, Vec3)
+computeLaguerreGaussElectricAndMagneticField !(FieldConstants wn _ rl absL sq2 abw) !(V3 x y z) time =
+  let xx = x * x
+      yy = y * y
+      r = sqrt (xx + yy)
       phi = atan2 y x
-      -- z_R
-      rayleighLength = pi * (waistRadius ^ (2 :: Int)) / wavelength
-      -- w(z)
-      width = waistRadius * sqrt (1 + (z / rayleighLength) ^ (2 :: Int))
-      -- r / w(z)
+      zOverRayleigh = z / rl
+      width = waistRadius * sqrt (1 + zOverRayleigh * zOverRayleigh)
       rOverWidth = r / width
-      rOverWidthSquared = rOverWidth ^ (2 :: Int)
-      -- k
-      wavenumber = 2 * pi / wavelength
-      -- \|l|
-      absL = abs azimuthalIndex
-      -- R(z)
-      radiusOfCurvature = if abs z < tolerance then 0 else z * (1 + (rayleighLength / z) ^ (2 :: Int))
-      -- r^2/(2 * R(z))
-      curvature = if abs radiusOfCurvature < tolerance then 0 else r ^ (2 :: Int) / (2 * radiusOfCurvature)
-      -- \psi(z)
-      gouyPhase = atan2 z rayleighLength
+      rOverWidthSquared = rOverWidth * rOverWidth
+      radiusOfCurvature =
+        if abs z < tolerance
+          then 0
+          else
+            let rayleighOverZ = rl / z
+             in z * (1 + rayleighOverZ * rayleighOverZ)
+      curvature =
+        if abs radiusOfCurvature < tolerance
+          then 0
+          else (xx + yy) / (2 * radiusOfCurvature)
+      gouyPhase = atan2 z rl
 
-      sqrt2 = sqrt 2
-      polynomialPart = laguerrePolynomial radialIndex (fromIntegral absL) (2 * rOverWidthSquared)
+      polynomialPart = laguerrePolynomialSpecialized (fromIntegral absL) (2 * rOverWidthSquared)
       exponentialDecay = exp (-rOverWidthSquared)
-      magnitude = amplitude * (waistRadius / width) * (sqrt2 * rOverWidth) ^ absL * polynomialPart * exponentialDecay
+      magnitude = abw * (1 / width) * (sq2 * rOverWidth) ^ absL * polynomialPart * exponentialDecay
 
       timePhaseShift = angularVelocity * time
-      longitudinalPhaseShift = wavenumber * z
-      curvaturePhaseShift = wavenumber * curvature
+      longitudinalPhaseShift = wn * z
+      curvaturePhaseShift = wn * curvature
       azimuthalPhaseShift = (fromIntegral azimuthalIndex) * phi
       gouyPhaseShift = (2 * (fromIntegral radialIndex) + (fromIntegral absL) + 1) * gouyPhase
       totalPhaseShift = timePhaseShift - longitudinalPhaseShift + curvaturePhaseShift + azimuthalPhaseShift - gouyPhaseShift
-      phase = exp (0 :+ totalPhaseShift)
 
-      cx = x :+ 0
-      cy = y :+ 0
+      coeffReal = magnitude * cos totalPhaseShift
+      coeffImag = magnitude * sin totalPhaseShift
 
-      coeff = (magnitude :+ 0) * phase
-      ex = coeff * polarizationX
-      ey = coeff * polarizationY
-      ez = (0 :+ 2) / ((wavenumber * width ^ (2 :: Int)) :+ 0) * (cx * ex + cy * ey)
+      prx :+ pix = polarizationX
+      pry :+ piy = polarizationY
+      exReal = coeffReal * prx - coeffImag * pix
+      exImag = coeffReal * pix + coeffImag * prx
+      eyReal = coeffReal * pry - coeffImag * piy
+      eyImag = coeffReal * piy + coeffImag * pry
 
-      e = V3 (realPart ex) (realPart ey) (realPart ez)
+      widthSquared = width * width
+      ezReal = (-2) * (x * exImag + y * eyImag) / (wn * widthSquared)
 
-      bx = -ey / (c :+ 0)
-      by = ex / (c :+ 0)
-      bz = (0 :+ 1) / ((angularVelocity * width ^ (2 :: Int)) :+ 0) * (cy * ex - cx * ey)
+      e = V3 exReal eyReal ezReal
 
-      b = V3 (realPart bx) (realPart by) (realPart bz)
+      bxReal = (-eyReal) / c
+      byReal = exReal / c
+      bzReal = (-(y * exImag - x * eyImag)) / (angularVelocity * widthSquared)
+
+      b = V3 bxReal byReal bzReal
    in (e, b)
 
-laguerrePolynomial :: Integer -> RealT -> RealT -> RealT
-laguerrePolynomial !n !_ !_ | n < 0 = error "laguerrePolynomial: index cannot be negative"
-laguerrePolynomial 0 !_ !_ = 1
-laguerrePolynomial 1 !alpha !x = 1 + alpha - x
-laguerrePolynomial 2 !alpha !x = 0.5 * (x ^ (2 :: Int) - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
-laguerrePolynomial !n !alpha !x =
-  let nr = fromIntegral n
-      left = laguerrePolynomial (n - 1) alpha x
-      right = laguerrePolynomial (n - 2) alpha x
-   in ((2 * nr - 1 + alpha - x) * left - (nr - 1 + alpha) * right) / nr
+laguerrePolynomialSpecialized :: RealT -> RealT -> RealT
+laguerrePolynomialSpecialized !alpha !x =
+  0.5 * (x * x - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
 
 computeAcceleration :: Vec4 -> Vec3 -> Vec3 -> Vec4
 computeAcceleration momentum e b =
@@ -126,7 +164,11 @@ computeAcceleration momentum e b =
       ax = gamma * ex / c + py * bz - pz * by
       ay = gamma * ey / c - px * bz + pz * bx
       az = gamma * ez / c + px * by - py * bx
-   in (* chargeToMassRatio) <$> (V4 agamma ax ay az)
+  in V4
+      (chargeToMassRatio * agamma)
+      (chargeToMassRatio * ax)
+      (chargeToMassRatio * ay)
+      (chargeToMassRatio * az)
 
 computeAngularMomentumInZDirection :: Position -> Momentum -> AngularMomentum
 computeAngularMomentumInZDirection (Position (V4 _ x y _)) (Momentum (V4 _ vx vy _)) =

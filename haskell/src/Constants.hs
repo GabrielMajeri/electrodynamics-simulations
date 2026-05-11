@@ -26,7 +26,7 @@ import Data.Complex (Complex ((:+)))
 import Types (ComplexT, RealT)
 
 numParticles :: Integer
-numParticles = 1 * 1024
+numParticles = 16 * 1024
 
 c :: RealT
 c = 137.036
