@@ -29,7 +29,7 @@ library
       src
   default-extensions:
       DuplicateRecordFields
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -optc=-march=native -optc-mtune=native -O
   build-depends:
       MonadRandom >=0.6
     , base >=4.7 && <5
@@ -51,7 +51,7 @@ executable electrodynamics-simulations-exe
       app
   default-extensions:
       DuplicateRecordFields
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -optc=-march=native -optc-mtune=native -O -threaded -rtsopts -with-rtsopts=-N4
   build-depends:
       MonadRandom >=0.6
     , base >=4.7 && <5

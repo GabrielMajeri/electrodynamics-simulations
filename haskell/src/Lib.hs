@@ -33,7 +33,7 @@ integrateTrajectories (initialPositions, initialMomenta) =
    in VU.unzip finalVariables
 
 integrationStep :: (Position, Momentum) -> (Position, Momentum)
-integrationStep (position, momentum) =
+integrationStep (!position, !momentum) =
   let (Position positionVector) = position
       (V4 laboratoryTime x y z) = positionVector
       (e, b) = computeLaguerreGaussElectricAndMagneticField (V3 x y z) laboratoryTime
@@ -47,7 +47,7 @@ integrationStep (position, momentum) =
    in (Position newPositionVector, Momentum newMomentumVector)
 
 cutOff :: RealT -> RealT
-cutOff phi = exp (-t ^ (2 :: Int))
+cutOff !phi = exp (-t ^ (2 :: Int))
   where
     t = (phi - phi0) / tau0
 
@@ -55,7 +55,7 @@ tolerance :: RealT
 tolerance = 1e-8
 
 computeLaguerreGaussElectricAndMagneticField :: Vec3 -> RealT -> (Vec3, Vec3)
-computeLaguerreGaussElectricAndMagneticField (V3 x y z) time =
+computeLaguerreGaussElectricAndMagneticField !(V3 x y z) time =
   let r = sqrt (x ^ (2 :: Int) + y ^ (2 :: Int))
       phi = atan2 y x
       -- z_R
@@ -107,11 +107,11 @@ computeLaguerreGaussElectricAndMagneticField (V3 x y z) time =
    in (e, b)
 
 laguerrePolynomial :: Integer -> RealT -> RealT -> RealT
-laguerrePolynomial n _ _ | n < 0 = error "laguerrePolynomial: index cannot be negative"
-laguerrePolynomial 0 _ _ = 1
-laguerrePolynomial 1 alpha x = 1 + alpha - x
-laguerrePolynomial 2 alpha x = 0.5 * (x ^ (2 :: Int) - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
-laguerrePolynomial n alpha x =
+laguerrePolynomial !n !_ !_ | n < 0 = error "laguerrePolynomial: index cannot be negative"
+laguerrePolynomial 0 !_ !_ = 1
+laguerrePolynomial 1 !alpha !x = 1 + alpha - x
+laguerrePolynomial 2 !alpha !x = 0.5 * (x ^ (2 :: Int) - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
+laguerrePolynomial !n !alpha !x =
   let nr = fromIntegral n
       left = laguerrePolynomial (n - 1) alpha x
       right = laguerrePolynomial (n - 2) alpha x
