@@ -1,35 +1,59 @@
-module Types (RealT, Vec3 (Vec3), Vec4 (Vec4), Position (Position), Momentum (Momentum)) where
+module Types
+  ( RealT,
+    ComplexT,
+    Vec3,
+    Vec4,
+    Position (Position),
+    Momentum (Momentum),
+    InitialConditions,
+    AngularMomentum (AngularMomentum),
+  )
+where
 
-import Data.Binary (Binary (put, get))
-import Data.Binary.Put (putWord64le)
-import Data.Binary.Get (getWord64le)
-import Data.Bits.Floating (coerceToFloat, coerceToWord)
+import Data.Complex (Complex)
+import Linear (V3, V4 (V4))
+import Data.Binary (Binary (get, put))
+import Foreign (Storable)
+import Data.Binary.Put (putDoublele)
+import Data.Binary.Get (getDoublele)
+import Control.DeepSeq (NFData)
 
 type RealT = Double
 
-data Vec3 = Vec3 {x :: RealT, y :: RealT, z :: RealT}
-  deriving (Show)
+type ComplexT = Complex RealT
 
-data Vec4 = Vec4 {a :: RealT, x :: RealT, y :: RealT, z :: RealT}
-  deriving (Show)
+type Vec3 = V3 RealT
 
-instance Binary Vec4 where
-    put (Vec4 a x y z) = do
-        putWord64le $ coerceToWord a
-        putWord64le $ coerceToWord x
-        putWord64le $ coerceToWord y
-        putWord64le $ coerceToWord z
-
-    get = do
-        a <- fmap coerceToFloat getWord64le
-        x <- fmap coerceToFloat getWord64le
-        y <- fmap coerceToFloat getWord64le
-        z <- fmap coerceToFloat getWord64le
-        return $ Vec4 a x y z
-
+type Vec4 = V4 RealT
 
 newtype Position = Position Vec4
-  deriving (Show)
+  deriving (Show, Storable, NFData)
+
+instance Binary Position where
+  put (Position (V4 a x y z)) = do
+    putDoublele a
+    putDoublele x
+    putDoublele y
+    putDoublele z
+
+  get = do
+    a <- getDoublele
+    x <- getDoublele
+    y <- getDoublele
+    z <- getDoublele
+    return $ Position (V4 a x y z)
 
 newtype Momentum = Momentum Vec4
-  deriving (Show)
+  deriving (Show, NFData)
+
+type InitialConditions = ([Position], [Momentum])
+
+newtype AngularMomentum = AngularMomentum RealT
+  deriving (Show, Storable, NFData)
+
+instance Binary AngularMomentum where
+  put (AngularMomentum am) = putDoublele am
+
+  get = do
+    am <- getDoublele
+    return $ AngularMomentum am

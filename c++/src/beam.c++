@@ -11,9 +11,9 @@ constexpr Real tolerance = 1e-5;
 std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     Vector3D position, Real time)
 {
-    const Real r = std::hypot(position.x, position.y);
-    const Real phi = std::atan2(position.y, position.x);
     const auto [x, y, z] = position;
+    const Real r = std::hypot(x, y);
+    const Real phi = std::atan2(y, x);
 
     const Real rayleigh_length = pi * std::pow(waist_radius, 2) / wavelength;
 

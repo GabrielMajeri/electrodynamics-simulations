@@ -10,6 +10,8 @@ dependencies:
   - binary >= 0.8
   - floating-bits >= 0.3
   - MonadRandom >= 0.6
+  - linear >= 1.23
+  - deepseq >= 1.5
 
 ghc-options:
   - -Wall
@@ -21,6 +23,7 @@ ghc-options:
   - -Wmissing-home-modules
   - -Wpartial-fields
   - -Wredundant-constraints
+  - -O
 
 # Use GHC dialect, with custom extensions
 language: GHC2024

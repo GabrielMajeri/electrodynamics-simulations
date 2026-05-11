@@ -29,7 +29,7 @@ space = fromIntegral $ ord ' '
 newline :: Word8
 newline = fromIntegral $ ord '\n'
 
-serializeDictionary :: [Vec4] -> Put
+serializeDictionary :: (Binary a, Storable a) => [a] -> Put
 serializeDictionary array = do
   -- DType descriptor
   putShortByteString $ fromString "{'descr':"
@@ -44,7 +44,9 @@ serializeDictionary array = do
   putWord8 comma
 
   -- Shape
-  let shapeTupleString = "(" ++ (show $ length array) ++ ",4)"
+  let elementSizeInBytes = sizeOf (head array)
+  let innerDimension = floor $ (fromIntegral elementSizeInBytes) / (fromIntegral realSizeInBytes)
+  let shapeTupleString = "(" ++ (show $ length array) ++ "," ++ (show innerDimension) ++ ")"
   putShortByteString $ fromString ("'shape':" ++ shapeTupleString)
 
   putWord8 $ fromIntegral $ ord '}'
@@ -52,8 +54,8 @@ serializeDictionary array = do
 alignment :: Int
 alignment = 64
 
-toNPYFile :: [Vec4] -> Put
-toNPYFile array = do
+toNPYFile :: (Binary a, Storable a) => [a] -> Put
+toNPYFile !array = do
   let magicHeader = runPut $ serializeMagicHeader
   let magicHeaderBytes = BL.unpack magicHeader
   let magicHeaderSize = length magicHeaderBytes

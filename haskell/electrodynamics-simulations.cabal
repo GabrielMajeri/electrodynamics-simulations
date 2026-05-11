@@ -28,13 +28,15 @@ library
       src
   default-extensions:
       DuplicateRecordFields
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O
   build-depends:
       MonadRandom >=0.6
     , base >=4.7 && <5
     , binary >=0.8
     , bytestring >=0.12
+    , deepseq >=1.5
     , floating-bits >=0.3
+    , linear >=1.23
     , random >=1.3
   default-language: GHC2024
 
@@ -46,13 +48,15 @@ executable electrodynamics-simulations-exe
       app
   default-extensions:
       DuplicateRecordFields
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O
   build-depends:
       MonadRandom >=0.6
     , base >=4.7 && <5
     , binary >=0.8
     , bytestring >=0.12
+    , deepseq >=1.5
     , electrodynamics-simulations
     , floating-bits >=0.3
+    , linear >=1.23
     , random >=1.3
   default-language: GHC2024
