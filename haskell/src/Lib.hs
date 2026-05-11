@@ -20,9 +20,11 @@ import Constants
     waistRadius,
     wavelength,
   )
+import Control.Parallel.Strategies (parList, rdeepseq, using)
 import Data.Complex (Complex ((:+)))
 import Data.Vector.Unboxed (Vector)
 import Data.Vector.Unboxed qualified as VU
+import GHC.Conc (numCapabilities)
 import Linear (V3 (V3), V4 (V4))
 import Types (AngularMomentum (AngularMomentum), Momentum (Momentum), Position (Position), RealT, Vec3, Vec4)
 
@@ -40,8 +42,19 @@ integrateTrajectories :: (Vector Position, Vector Momentum) -> (Vector Position,
 integrateTrajectories (initialPositions, initialMomenta) =
   let variables = VU.zip initialPositions initialMomenta
       !fieldConsts = precomputeFieldConstants
-      finalVariables = VU.map (integrateNSteps fieldConsts numIntegrationSteps) variables
+      n = VU.length variables
+      chunkSize = max 1 ((n + numCapabilities - 1) `div` numCapabilities)
+      chunks = chunksOf chunkSize variables
+      processedChunks =
+        map (VU.map (integrateNSteps fieldConsts numIntegrationSteps)) chunks
+          `using` parList rdeepseq
+      finalVariables = VU.concat processedChunks
    in VU.unzip finalVariables
+
+chunksOf :: VU.Unbox a => Int -> VU.Vector a -> [VU.Vector a]
+chunksOf size v
+  | VU.null v = []
+  | otherwise = let (h, t) = VU.splitAt size v in h : chunksOf size t
 
 precomputeFieldConstants :: FieldConstants
 precomputeFieldConstants =

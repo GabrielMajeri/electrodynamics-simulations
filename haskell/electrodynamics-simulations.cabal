@@ -29,7 +29,7 @@ library
       src
   default-extensions:
       DuplicateRecordFields
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -g2 -optc=-march=native -optc=-mtune=native -fllvm -O2 -fspecialise-aggressively
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -g2 -optc=-march=native -optc=-mtune=native -O2 -fspecialise-aggressively
   build-depends:
       MonadRandom >=0.6
     , base >=4.7 && <5
@@ -51,7 +51,7 @@ executable electrodynamics-simulations-exe
       app
   default-extensions:
       DuplicateRecordFields
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -g2 -optc=-march=native -optc=-mtune=native -fllvm -O2 -fspecialise-aggressively -threaded -rtsopts -with-rtsopts=-N256
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -g2 -optc=-march=native -optc=-mtune=native -O2 -fspecialise-aggressively -threaded -rtsopts -with-rtsopts=-N256
   build-depends:
       MonadRandom >=0.6
     , base >=4.7 && <5

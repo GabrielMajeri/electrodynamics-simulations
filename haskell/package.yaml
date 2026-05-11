@@ -27,7 +27,7 @@ ghc-options:
   - -Wredundant-constraints
   - -g2
   - -optc=-march=native -optc=-mtune=native
-  - -fllvm
+  # - -fllvm
   - -O2
   - -fspecialise-aggressively
 
