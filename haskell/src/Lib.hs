@@ -1,6 +1,5 @@
 module Lib
-  ( generateInitialConditions,
-    integrateTrajectories,
+  ( integrateTrajectories,
     computeAngularMomentaInZDirection,
   )
 where
@@ -11,57 +10,27 @@ import Constants
     azimuthalIndex,
     c,
     chargeToMassRatio,
-    diskRadius,
     integrationTimeStep,
     numIntegrationSteps,
-    numParticles,
     phi0,
+    polarizationX,
+    polarizationY,
     radialIndex,
     tau0,
     waistRadius,
-    wavelength, polarizationY, polarizationX,
+    wavelength,
   )
-import Control.Monad.Random (MonadRandom (getRandomR), Rand, RandomGen)
 import Data.Complex (Complex ((:+)), realPart)
+import Data.Vector.Unboxed (Vector)
+import Data.Vector.Unboxed qualified as VU
 import Linear (V3 (V3), V4 (V4))
-import Types (Momentum (Momentum), Position (Position), RealT, Vec3, Vec4, AngularMomentum (AngularMomentum))
+import Types (AngularMomentum (AngularMomentum), Momentum (Momentum), Position (Position), RealT, Vec3, Vec4)
 
-generateRandomPosition :: (RandomGen g) => Rand g Position
-generateRandomPosition = do
-  let diskRadiusSquared = diskRadius ^ 2
-
-  -- Rejection sampling: generate u in the range [0, R^2]
-  -- then compute sqrt(u)
-  rSquared <- getRandomR (0, diskRadiusSquared)
-  let r = sqrt rSquared
-
-  -- Generate a random angle between 0 and 2*PI
-  theta <- getRandomR (0, 2 * pi)
-
-  -- Convert to Cartesian coordinates
-  let x = r * cos (theta)
-      y = r * sin (theta)
-
-  return $ Position $ V4 0 x y 0
-
-initialMomentum :: Momentum
-initialMomentum = Momentum $ V4 1 0 0 0
-
-generateInitialPositions :: (RandomGen g) => Int -> Rand g [Position]
-generateInitialPositions n = sequence $ replicate n generateRandomPosition
-
-generateInitialConditions :: (RandomGen g) => Rand g ([Position], [Momentum])
-generateInitialConditions = do
-  let n = fromIntegral numParticles
-  initialPositions <- generateInitialPositions n
-  let initialMomenta = replicate n initialMomentum
-  return $ (initialPositions, initialMomenta)
-
-integrateTrajectories :: ([Position], [Momentum]) -> ([Position], [Momentum])
+integrateTrajectories :: (Vector Position, Vector Momentum) -> (Vector Position, Vector Momentum)
 integrateTrajectories (initialPositions, initialMomenta) =
-  let variables = zip initialPositions initialMomenta
-      finalVariables = map (\vars -> iterate integrationStep vars !! numIntegrationSteps) variables
-   in unzip finalVariables
+  let variables = VU.zip initialPositions initialMomenta
+      finalVariables = VU.map (\state -> iterate integrationStep state !! numIntegrationSteps) variables
+   in VU.unzip finalVariables
 
 integrationStep :: (Position, Momentum) -> (Position, Momentum)
 integrationStep (position, momentum) =
@@ -78,7 +47,7 @@ integrationStep (position, momentum) =
    in (Position newPositionVector, Momentum newMomentumVector)
 
 cutOff :: RealT -> RealT
-cutOff phi = exp (-t ^ 2)
+cutOff phi = exp (-t ^ (2 :: Int))
   where
     t = (phi - phi0) / tau0
 
@@ -87,29 +56,29 @@ tolerance = 1e-8
 
 computeLaguerreGaussElectricAndMagneticField :: Vec3 -> RealT -> (Vec3, Vec3)
 computeLaguerreGaussElectricAndMagneticField (V3 x y z) time =
-  let r = sqrt (x ^ 2 + y ^ 2)
+  let r = sqrt (x ^ (2 :: Int) + y ^ (2 :: Int))
       phi = atan2 y x
       -- z_R
-      rayleighLength = pi * (waistRadius ^ 2) / wavelength
+      rayleighLength = pi * (waistRadius ^ (2 :: Int)) / wavelength
       -- w(z)
-      width = waistRadius * sqrt (1 + (z / rayleighLength) ^ 2)
+      width = waistRadius * sqrt (1 + (z / rayleighLength) ^ (2 :: Int))
       -- r / w(z)
       rOverWidth = r / width
-      rOverWidthSquared = rOverWidth ^ 2
+      rOverWidthSquared = rOverWidth ^ (2 :: Int)
       -- k
       wavenumber = 2 * pi / wavelength
       -- \|l|
       absL = abs azimuthalIndex
       -- R(z)
-      radiusOfCurvature = if abs z < tolerance then 0 else z * (1 + (rayleighLength / z) ^ 2)
+      radiusOfCurvature = if abs z < tolerance then 0 else z * (1 + (rayleighLength / z) ^ (2 :: Int))
       -- r^2/(2 * R(z))
-      curvature = if abs radiusOfCurvature < tolerance then 0 else r ^ 2 / (2 * radiusOfCurvature)
+      curvature = if abs radiusOfCurvature < tolerance then 0 else r ^ (2 :: Int) / (2 * radiusOfCurvature)
       -- \psi(z)
       gouyPhase = atan2 z rayleighLength
 
       sqrt2 = sqrt 2
       polynomialPart = laguerrePolynomial radialIndex (fromIntegral absL) (2 * rOverWidthSquared)
-      exponentialDecay = exp (- rOverWidthSquared)
+      exponentialDecay = exp (-rOverWidthSquared)
       magnitude = amplitude * (waistRadius / width) * (sqrt2 * rOverWidth) ^ absL * polynomialPart * exponentialDecay
 
       timePhaseShift = angularVelocity * time
@@ -126,28 +95,27 @@ computeLaguerreGaussElectricAndMagneticField (V3 x y z) time =
       coeff = (magnitude :+ 0) * phase
       ex = coeff * polarizationX
       ey = coeff * polarizationY
-      ez = (0 :+ 2) / ((wavenumber * width^2) :+ 0) * (cx * ex + cy * ey)
+      ez = (0 :+ 2) / ((wavenumber * width ^ (2 :: Int)) :+ 0) * (cx * ex + cy * ey)
 
       e = V3 (realPart ex) (realPart ey) (realPart ez)
 
-      bx = - ey / (c :+ 0)
+      bx = -ey / (c :+ 0)
       by = ex / (c :+ 0)
-      bz = (0 :+ 1) / ((angularVelocity * width^2) :+ 0) * (cy * ex - cx * ey)
+      bz = (0 :+ 1) / ((angularVelocity * width ^ (2 :: Int)) :+ 0) * (cy * ex - cx * ey)
 
       b = V3 (realPart bx) (realPart by) (realPart bz)
-
    in (e, b)
 
 laguerrePolynomial :: Integer -> RealT -> RealT -> RealT
 laguerrePolynomial n _ _ | n < 0 = error "laguerrePolynomial: index cannot be negative"
 laguerrePolynomial 0 _ _ = 1
 laguerrePolynomial 1 alpha x = 1 + alpha - x
-laguerrePolynomial 2 alpha x = 0.5 * (x^2 - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
+laguerrePolynomial 2 alpha x = 0.5 * (x ^ (2 :: Int) - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
 laguerrePolynomial n alpha x =
   let nr = fromIntegral n
       left = laguerrePolynomial (n - 1) alpha x
       right = laguerrePolynomial (n - 2) alpha x
-  in ((2 * nr - 1 + alpha - x) * left - (nr - 1 + alpha) * right) / nr
+   in ((2 * nr - 1 + alpha - x) * left - (nr - 1 + alpha) * right) / nr
 
 computeAcceleration :: Vec4 -> Vec3 -> Vec3 -> Vec4
 computeAcceleration momentum e b =
@@ -164,6 +132,6 @@ computeAngularMomentumInZDirection :: Position -> Momentum -> AngularMomentum
 computeAngularMomentumInZDirection (Position (V4 _ x y _)) (Momentum (V4 _ vx vy _)) =
   AngularMomentum $ x * vy - y * vx
 
-computeAngularMomentaInZDirection :: [Position] -> [Momentum] -> [AngularMomentum]
-computeAngularMomentaInZDirection positions momenta =
-  map (uncurry computeAngularMomentumInZDirection) (zip positions momenta)
+computeAngularMomentaInZDirection :: (Vector Position, Vector Momentum) -> Vector AngularMomentum
+computeAngularMomentaInZDirection (positions, momenta) =
+  VU.zipWith computeAngularMomentumInZDirection positions momenta

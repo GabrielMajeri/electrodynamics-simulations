@@ -19,6 +19,7 @@ source-repository head
 library
   exposed-modules:
       Constants
+      InitialConditions
       Lib
       NPY
       Types
@@ -37,7 +38,9 @@ library
     , deepseq >=1.5
     , floating-bits >=0.3
     , linear >=1.23
+    , parallel >=3.2
     , random >=1.3
+    , vector >=0.13.2
   default-language: GHC2024
 
 executable electrodynamics-simulations-exe
@@ -48,7 +51,7 @@ executable electrodynamics-simulations-exe
       app
   default-extensions:
       DuplicateRecordFields
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       MonadRandom >=0.6
     , base >=4.7 && <5
@@ -58,5 +61,7 @@ executable electrodynamics-simulations-exe
     , electrodynamics-simulations
     , floating-bits >=0.3
     , linear >=1.23
+    , parallel >=3.2
     , random >=1.3
+    , vector >=0.13.2
   default-language: GHC2024

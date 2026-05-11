@@ -1,17 +1,19 @@
 module Main (main) where
 
-import Constants (numParticles, numIntegrationSteps, integrationStartTime, integrationEndTime,integrationTimeStep)
+import Constants (integrationEndTime, integrationStartTime, integrationTimeStep, numIntegrationSteps, numParticles)
+import Control.DeepSeq (deepseq)
+import Control.Monad.Random (evalRand)
 import Data.Binary.Put (runPut)
 import Data.ByteString.Lazy (hPut)
-import Lib ( generateInitialConditions, integrateTrajectories, computeAngularMomentaInZDirection )
+import Data.Vector.Unboxed (Vector)
+import GHC.Clock (getMonotonicTime)
+import InitialConditions (generateInitialConditions)
+import Lib (computeAngularMomentaInZDirection, integrateTrajectories)
 import NPY (toNPYFile)
-import System.CPUTime ( getCPUTime )
-import System.IO ( IOMode(WriteMode), openFile, hClose )
+import System.IO (IOMode (WriteMode), hClose, openFile)
 import System.Random (mkStdGen)
-import Text.Printf
-import Types (Position (Position), InitialConditions)
-import Control.Monad.Random (evalRand)
-import Control.DeepSeq (rnf)
+import Text.Printf (printf)
+import Types (AngularMomentum, InitialConditions, Momentum, Position)
 
 randomSeed :: Int
 randomSeed = 42
@@ -24,27 +26,13 @@ main = do
 
   putStrLn ""
 
-  printf "Starting the numerical integration of %d particle trajectories\n" numParticles
-  printf "Integrating from initial time = %f to final time = %f with a time step of %f, a total of %d time steps\n" integrationStartTime integrationEndTime integrationTimeStep numIntegrationSteps
-
-  start <- seq (rnf initialPositions, rnf initialMomenta) getCPUTime
-  let (finalPositions, finalMomenta) = integrateTrajectories (initialPositions, initialMomenta)
-  end <- seq (rnf finalPositions, rnf finalMomenta) getCPUTime
-  let duration = (fromIntegral (end - start)) / (10 ^ 12)
-  printf "Integrating trajectories took %0.6f seconds\n" (duration :: Double)
+  finalState <- performTrajectoryIntegration (initialPositions, initialMomenta)
 
   putStrLn ""
 
-  start <- seq finalPositions getCPUTime
-  let angularMomenta = computeAngularMomentaInZDirection finalPositions finalMomenta
-  end <- seq angularMomenta getCPUTime
-  let duration = (fromIntegral (end - start)) / (10 ^ 12)
-  printf "Computing angular momenta took %0.6f seconds\n" (duration :: Double)
+  angularMomenta <- computeAngularMomentaForFinalState finalState
 
-  putStrLn "Saving final angular momenta to disk..."
-  file <- openFile "angular_momenta.npy" WriteMode
-  hPut file $ runPut $ toNPYFile angularMomenta
-  hClose file
+  saveAngularMomentaToDisk angularMomenta
 
   putStrLn "Done!"
 
@@ -53,25 +41,64 @@ initialConditionsGeneration = do
   let g = mkStdGen randomSeed
 
   printf "Starting to generate initial conditions for %d particles...\n" numParticles
-  start <- getCPUTime
+  start <- deepseq g getMonotonicTime
 
   let initialConditions = evalRand generateInitialConditions g
 
-  end <- seq (rnf initialConditions) getCPUTime
-  let duration = (fromIntegral (end - start)) / (10 ^ 12)
-  printf "Generating %d initial conditions took %0.6f seconds\n" numParticles (duration :: Double)
+  end <- deepseq initialConditions getMonotonicTime
+  let duration = (end - start)
+  printf "Generating %d initial conditions took %0.6f seconds\n" numParticles duration
 
   return initialConditions
 
-saveInitialPositionsToDisk :: [Position] -> IO ()
+saveInitialPositionsToDisk :: Vector Position -> IO ()
 saveInitialPositionsToDisk initialPositions = do
   putStrLn "Saving initial positions to disk..."
-  start <- seq (rnf initialPositions) getCPUTime
+  start <- getMonotonicTime
 
   file <- openFile "initial_positions.npy" WriteMode
   hPut file $ runPut $ toNPYFile initialPositions
   hClose file
 
-  end <- getCPUTime
-  let duration = (fromIntegral (end - start)) / (10 ^ 12)
-  printf "Dumping initial positions to disk took %0.6f seconds\n" (duration :: Double)
+  end <- getMonotonicTime
+  let duration = (end - start)
+  printf "Saving initial positions to disk took %0.6f seconds\n" duration
+
+performTrajectoryIntegration :: InitialConditions -> IO (Vector Position, Vector Momentum)
+performTrajectoryIntegration initialState = do
+  printf "Starting the numerical integration of %d particle trajectories\n" numParticles
+  printf "Integrating from initial time = %f to final time = %f with a time step of %f, a total of %d time steps\n" integrationStartTime integrationEndTime integrationTimeStep numIntegrationSteps
+
+  start <- deepseq initialState getMonotonicTime
+  let finalState = integrateTrajectories initialState
+  end <- deepseq finalState getMonotonicTime
+  let duration = (end - start)
+  printf "Integrating trajectories took %0.6f seconds\n" duration
+
+  return finalState
+
+computeAngularMomentaForFinalState :: (Vector Position, Vector Momentum) -> IO (Vector AngularMomentum)
+computeAngularMomentaForFinalState initialState = do
+  start <- deepseq initialState getMonotonicTime
+
+  let angularMomenta = computeAngularMomentaInZDirection initialState
+
+  end <- deepseq angularMomenta getMonotonicTime
+  let duration = (end - start)
+  printf "Computing angular momenta took %0.6f seconds\n" duration
+
+  return angularMomenta
+
+saveAngularMomentaToDisk :: Vector AngularMomentum -> IO ()
+saveAngularMomentaToDisk angularMomenta = do
+  putStrLn "Saving final angular momenta to disk..."
+
+  start <- deepseq angularMomenta getMonotonicTime
+
+  file <- openFile "angular_momenta.npy" WriteMode
+  hPut file $ runPut $ toNPYFile angularMomenta
+  hClose file
+
+  end <- getMonotonicTime
+  let duration = (end - start)
+  printf "Saving angular momenta to disk took %0.6f seconds\n" duration

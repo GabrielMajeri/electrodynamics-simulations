@@ -18,15 +18,15 @@ module Constants
     wavelength,
     amplitude,
     polarizationX,
-    polarizationY
+    polarizationY,
   )
 where
 
-import Types (RealT, ComplexT)
 import Data.Complex (Complex ((:+)))
+import Types (ComplexT, RealT)
 
 numParticles :: Integer
-numParticles = 2 * 1024
+numParticles = 1 * 1024
 
 c :: RealT
 c = 137.036
@@ -92,7 +92,7 @@ amplitude :: RealT
 amplitude = a0 * particleMass * c * omega / (abs particleCharge)
 
 polarizationX :: ComplexT
-polarizationX = (1/(sqrt 2)) :+ 0
+polarizationX = (1 / (sqrt 2)) :+ 0
 
 polarizationY :: ComplexT
-polarizationY = 0 :+ (-1/(sqrt 2))
+polarizationY = 0 :+ (-1 / (sqrt 2))
