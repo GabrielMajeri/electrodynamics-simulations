@@ -39,10 +39,10 @@ integrateTrajectories (initialPositions, initialMomenta) =
   let !fieldConsts = precomputeFieldConstants
       stepper = integrateNSteps fieldConsts numIntegrationSteps
       finalVariables =
-        A.computeAs A.B
-          $ A.setComp A.Par
-          $ A.map stepper
-          $ A.zip initialPositions initialMomenta
+        A.computeAs A.B $
+          A.setComp A.Par $
+            A.map stepper $
+              A.zip initialPositions initialMomenta
       (finalPositions, finalMomenta) = A.unzip finalVariables
    in (A.computeAs A.S finalPositions, A.computeAs A.S finalMomenta)
 

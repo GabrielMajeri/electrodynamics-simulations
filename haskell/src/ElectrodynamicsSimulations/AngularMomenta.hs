@@ -13,6 +13,6 @@ computeAngularMomentumInZDirection (Position (V4 _ x y _)) (Momentum (V4 _ vx vy
 
 computeAngularMomentaInZDirection :: (SimArray Position, SimArray Momentum) -> SimArray AngularMomentum
 computeAngularMomentaInZDirection (positions, momenta) =
-  A.computeAs A.S
-    $ A.setComp A.Par
-    $ A.zipWith computeAngularMomentumInZDirection positions momenta
+  A.computeAs A.S $
+    A.setComp A.Par $
+      A.zipWith computeAngularMomentumInZDirection positions momenta
