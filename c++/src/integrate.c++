@@ -55,14 +55,24 @@ IntegrationResult integrate_trajectories(
 
             const auto [new_position, new_momentum] = perform_integration_step(previous_position, previous_momentum);
 
+            // \symfrak{R}_0 (for this particle)
+            const auto initial_position = Vector3D::from_position(initial_positions[particle_index]);
+
             for (std::size_t detector_index = 0; detector_index < num_detector_points; ++detector_index)
             {
                 const auto particle_position = Vector3D::from_position(new_position);
                 const auto particle_velocity = Vector3D::from_momentum(new_momentum);
 
+                // r_0(t) = r(t) - R_0
+                const auto particle_displacement = particle_position - initial_position;
+
+                // x_0(t) = x - R_0
+                const auto detector_displacement = detector_positions[detector_index] - initial_position;
+
                 // R(x_0, t) = x_0 - r_0(t) = (x - R_0) - (r(t) - R_0) = x - r(t)
-                const auto displacement = detector_positions[detector_index] - particle_position;
+                const auto displacement = detector_displacement - particle_displacement;
                 const auto displacement_norm = displacement.norm();
+
                 // n(x_0, t) = R(x_0, t)/|R(x_0, t)|
                 const auto view_direction = displacement / displacement_norm;
 
