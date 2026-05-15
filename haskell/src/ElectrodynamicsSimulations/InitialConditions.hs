@@ -1,8 +1,7 @@
 module ElectrodynamicsSimulations.InitialConditions (generateInitialConditions) where
 
 import Control.Monad.Random (MonadRandom (getRandomR), Rand, RandomGen)
-import Data.Vector.Unboxed (Vector)
-import Data.Vector.Unboxed qualified as VU
+import Data.Massiv.Array qualified as A
 import ElectrodynamicsSimulations.Constants
   ( diskRadius,
     numParticles,
@@ -31,12 +30,13 @@ generateRandomPosition = do
 initialMomentum :: Momentum
 initialMomentum = Momentum $ V4 1 0 0 0
 
-generateInitialPositions :: (RandomGen g) => Int -> Rand g (Vector Position)
-generateInitialPositions n = VU.replicateM n generateRandomPosition
+generateInitialPositions :: (RandomGen g) => Int -> Rand g (A.Array A.S A.Ix1 Position)
+generateInitialPositions n =
+  A.makeArrayAR A.S (A.Sz1 n) $ const generateRandomPosition
 
 generateInitialConditions :: (RandomGen g) => Rand g InitialConditions
 generateInitialConditions = do
   let n = fromIntegral numParticles
   initialPositions <- generateInitialPositions n
-  let initialMomenta = VU.replicate n initialMomentum
-  return $ (initialPositions, initialMomenta)
+  let initialMomenta = A.replicate A.Seq (A.Sz1 n) initialMomentum
+  return (initialPositions, initialMomenta)

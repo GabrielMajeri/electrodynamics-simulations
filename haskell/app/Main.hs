@@ -4,13 +4,12 @@ import Control.DeepSeq (deepseq)
 import Control.Monad.Random (evalRand)
 import Data.Binary.Put (runPut)
 import Data.ByteString.Lazy (hPut)
-import Data.Vector.Unboxed (Vector)
 import ElectrodynamicsSimulations.AngularMomenta (computeAngularMomentaInZDirection)
 import ElectrodynamicsSimulations.Constants (integrationEndTime, integrationStartTime, integrationTimeStep, numIntegrationSteps, numParticles)
 import ElectrodynamicsSimulations.InitialConditions (generateInitialConditions)
 import ElectrodynamicsSimulations.Integrate (integrateTrajectories)
 import ElectrodynamicsSimulations.NPY (toNPYFile)
-import ElectrodynamicsSimulations.Types (AngularMomentum, InitialConditions, Momentum, Position)
+import ElectrodynamicsSimulations.Types (AngularMomentum, InitialConditions, Momentum, Position, SimArray)
 import GHC.Clock (getMonotonicTime)
 import System.IO (IOMode (WriteMode), hClose, openFile)
 import System.Random (mkStdGen)
@@ -52,7 +51,7 @@ initialConditionsGeneration = do
 
   return initialConditions
 
-saveInitialPositionsToDisk :: Vector Position -> IO ()
+saveInitialPositionsToDisk :: SimArray Position -> IO ()
 saveInitialPositionsToDisk initialPositions = do
   putStrLn "Saving initial positions to disk..."
   start <- getMonotonicTime
@@ -65,7 +64,7 @@ saveInitialPositionsToDisk initialPositions = do
   let duration = (end - start)
   printf "Saving initial positions to disk took %0.6f seconds\n" duration
 
-performTrajectoryIntegration :: InitialConditions -> IO (Vector Position, Vector Momentum)
+performTrajectoryIntegration :: InitialConditions -> IO (SimArray Position, SimArray Momentum)
 performTrajectoryIntegration initialState = do
   printf "Starting the numerical integration of %d particle trajectories\n" numParticles
   printf "Integrating from initial time = %f to final time = %f with a time step of %f, a total of %d time steps\n" integrationStartTime integrationEndTime integrationTimeStep numIntegrationSteps
@@ -78,7 +77,7 @@ performTrajectoryIntegration initialState = do
 
   return finalState
 
-computeAngularMomentaForFinalState :: (Vector Position, Vector Momentum) -> IO (Vector AngularMomentum)
+computeAngularMomentaForFinalState :: (SimArray Position, SimArray Momentum) -> IO (SimArray AngularMomentum)
 computeAngularMomentaForFinalState initialState = do
   start <- deepseq initialState getMonotonicTime
 
@@ -90,7 +89,7 @@ computeAngularMomentaForFinalState initialState = do
 
   return angularMomenta
 
-saveAngularMomentaToDisk :: Vector AngularMomentum -> IO ()
+saveAngularMomentaToDisk :: SimArray AngularMomentum -> IO ()
 saveAngularMomentaToDisk angularMomenta = do
   putStrLn "Saving final angular momenta to disk..."
 

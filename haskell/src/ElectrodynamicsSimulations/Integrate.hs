@@ -3,10 +3,8 @@ module ElectrodynamicsSimulations.Integrate
   )
 where
 
-import Control.Parallel.Strategies (rdeepseq, parList, using)
 import Data.Complex (Complex ((:+)))
-import Data.Vector.Unboxed (Vector)
-import Data.Vector.Unboxed qualified as VU
+import Data.Massiv.Array qualified as A
 import ElectrodynamicsSimulations.Constants
   ( amplitude,
     angularVelocity,
@@ -23,8 +21,7 @@ import ElectrodynamicsSimulations.Constants
     waistRadius,
     wavelength,
   )
-import ElectrodynamicsSimulations.Types (Momentum (Momentum), Position (Position), RealT, Vec3, Vec4)
-import GHC.Conc (numCapabilities)
+import ElectrodynamicsSimulations.Types (Momentum (Momentum), Position (Position), RealT, SimArray, Vec3, Vec4)
 import Linear (V3 (V3), V4 (V4))
 
 data FieldConstants = FieldConstants
@@ -37,23 +34,17 @@ data FieldConstants = FieldConstants
   }
   deriving (Show)
 
-integrateTrajectories :: (Vector Position, Vector Momentum) -> (Vector Position, Vector Momentum)
+integrateTrajectories :: (SimArray Position, SimArray Momentum) -> (SimArray Position, SimArray Momentum)
 integrateTrajectories (initialPositions, initialMomenta) =
-  let variables = VU.zip initialPositions initialMomenta
-      !fieldConsts = precomputeFieldConstants
-      n = VU.length variables
-      chunkSize = max 1 ((n + numCapabilities - 1) `div` numCapabilities)
-      chunks = chunksOf chunkSize variables
-      processedChunks =
-        map (VU.map (integrateNSteps fieldConsts numIntegrationSteps)) chunks
-          `using` parList rdeepseq
-      finalVariables = VU.concat processedChunks
-   in VU.unzip finalVariables
-
-chunksOf :: (VU.Unbox a) => Int -> VU.Vector a -> [VU.Vector a]
-chunksOf size v
-  | VU.null v = []
-  | otherwise = let (h, t) = VU.splitAt size v in h : chunksOf size t
+  let !fieldConsts = precomputeFieldConstants
+      stepper = integrateNSteps fieldConsts numIntegrationSteps
+      finalVariables =
+        A.computeAs A.B
+          $ A.setComp A.Par
+          $ A.map stepper
+          $ A.zip initialPositions initialMomenta
+      (finalPositions, finalMomenta) = A.unzip finalVariables
+   in (A.computeAs A.S finalPositions, A.computeAs A.S finalMomenta)
 
 precomputeFieldConstants :: FieldConstants
 precomputeFieldConstants =

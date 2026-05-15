@@ -37,11 +37,9 @@ library
     , binary >=0.8
     , bytestring >=0.12
     , deepseq >=1.5
-    , floating-bits >=0.3
     , linear >=1.23
-    , parallel >=3.2
+    , massiv >=1.0.5
     , random >=1.3
-    , vector >=0.13.2
   default-language: GHC2024
 
 executable electrodynamics-simulations-exe
@@ -60,9 +58,7 @@ executable electrodynamics-simulations-exe
     , bytestring >=0.12
     , deepseq >=1.5
     , electrodynamics-simulations
-    , floating-bits >=0.3
     , linear >=1.23
-    , parallel >=3.2
+    , massiv >=1.0.5
     , random >=1.3
-    , vector >=0.13.2
   default-language: GHC2024
