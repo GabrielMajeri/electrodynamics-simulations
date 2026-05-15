@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 
-module Types
+module ElectrodynamicsSimulations.Types
   ( RealT,
     ComplexT,
     Vec3,

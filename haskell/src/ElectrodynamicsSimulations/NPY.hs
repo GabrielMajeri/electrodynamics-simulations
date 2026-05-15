@@ -1,4 +1,4 @@
-module NPY (toNPYFile) where
+module ElectrodynamicsSimulations.NPY (toNPYFile) where
 
 import Data.Binary (Binary (put), Word8)
 import Data.Binary.Put (Put, putLazyByteString, putShortByteString, putWord32le, putWord8, runPut)
@@ -8,7 +8,7 @@ import Data.String (IsString (fromString))
 import Data.Vector.Unboxed (Unbox, Vector, toList, (!))
 import Data.Vector.Unboxed qualified as VU
 import Foreign (Storable (sizeOf))
-import Types (RealT)
+import ElectrodynamicsSimulations.Types (RealT)
 
 serializeMagicHeader :: Put
 serializeMagicHeader = do

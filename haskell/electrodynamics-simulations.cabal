@@ -18,11 +18,12 @@ source-repository head
 
 library
   exposed-modules:
-      Constants
-      InitialConditions
-      Lib
-      NPY
-      Types
+      ElectrodynamicsSimulations.AngularMomenta
+      ElectrodynamicsSimulations.Constants
+      ElectrodynamicsSimulations.InitialConditions
+      ElectrodynamicsSimulations.Integrate
+      ElectrodynamicsSimulations.NPY
+      ElectrodynamicsSimulations.Types
   other-modules:
       Paths_electrodynamics_simulations
   hs-source-dirs:

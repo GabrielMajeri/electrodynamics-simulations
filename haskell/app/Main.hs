@@ -1,19 +1,20 @@
 module Main (main) where
 
-import Constants (integrationEndTime, integrationStartTime, integrationTimeStep, numIntegrationSteps, numParticles)
 import Control.DeepSeq (deepseq)
 import Control.Monad.Random (evalRand)
 import Data.Binary.Put (runPut)
 import Data.ByteString.Lazy (hPut)
 import Data.Vector.Unboxed (Vector)
+import ElectrodynamicsSimulations.AngularMomenta (computeAngularMomentaInZDirection)
+import ElectrodynamicsSimulations.Constants (integrationEndTime, integrationStartTime, integrationTimeStep, numIntegrationSteps, numParticles)
+import ElectrodynamicsSimulations.InitialConditions (generateInitialConditions)
+import ElectrodynamicsSimulations.Integrate (integrateTrajectories)
+import ElectrodynamicsSimulations.NPY (toNPYFile)
+import ElectrodynamicsSimulations.Types (AngularMomentum, InitialConditions, Momentum, Position)
 import GHC.Clock (getMonotonicTime)
-import InitialConditions (generateInitialConditions)
-import Lib (computeAngularMomentaInZDirection, integrateTrajectories)
-import NPY (toNPYFile)
 import System.IO (IOMode (WriteMode), hClose, openFile)
 import System.Random (mkStdGen)
 import Text.Printf (printf)
-import Types (AngularMomentum, InitialConditions, Momentum, Position)
 
 randomSeed :: Int
 randomSeed = 42

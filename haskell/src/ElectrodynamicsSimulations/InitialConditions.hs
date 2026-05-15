@@ -1,14 +1,14 @@
-module InitialConditions (generateInitialConditions) where
+module ElectrodynamicsSimulations.InitialConditions (generateInitialConditions) where
 
-import Constants
-  ( diskRadius,
-    numParticles,
-  )
 import Control.Monad.Random (MonadRandom (getRandomR), Rand, RandomGen)
 import Data.Vector.Unboxed (Vector)
 import Data.Vector.Unboxed qualified as VU
+import ElectrodynamicsSimulations.Constants
+  ( diskRadius,
+    numParticles,
+  )
+import ElectrodynamicsSimulations.Types (InitialConditions, Momentum (Momentum), Position (Position))
 import Linear (V4 (V4))
-import Types (InitialConditions, Momentum (Momentum), Position (Position))
 
 generateRandomPosition :: (RandomGen g) => Rand g Position
 generateRandomPosition = do

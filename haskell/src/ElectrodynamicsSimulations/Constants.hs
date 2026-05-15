@@ -1,4 +1,4 @@
-module Constants
+module ElectrodynamicsSimulations.Constants
   ( c,
     omega,
     numParticles,
@@ -23,7 +23,7 @@ module Constants
 where
 
 import Data.Complex (Complex ((:+)))
-import Types (ComplexT, RealT)
+import ElectrodynamicsSimulations.Types (ComplexT, RealT)
 
 numParticles :: Integer
 numParticles = 64 * 1024

@@ -1,10 +1,13 @@
-module Lib
+module ElectrodynamicsSimulations.Integrate
   ( integrateTrajectories,
-    computeAngularMomentaInZDirection,
   )
 where
 
-import Constants
+import Control.Parallel.Strategies (rdeepseq, parList, using)
+import Data.Complex (Complex ((:+)))
+import Data.Vector.Unboxed (Vector)
+import Data.Vector.Unboxed qualified as VU
+import ElectrodynamicsSimulations.Constants
   ( amplitude,
     angularVelocity,
     azimuthalIndex,
@@ -20,13 +23,9 @@ import Constants
     waistRadius,
     wavelength,
   )
-import Control.Parallel.Strategies (parList, rdeepseq, using)
-import Data.Complex (Complex ((:+)))
-import Data.Vector.Unboxed (Vector)
-import Data.Vector.Unboxed qualified as VU
+import ElectrodynamicsSimulations.Types (Momentum (Momentum), Position (Position), RealT, Vec3, Vec4)
 import GHC.Conc (numCapabilities)
 import Linear (V3 (V3), V4 (V4))
-import Types (AngularMomentum (AngularMomentum), Momentum (Momentum), Position (Position), RealT, Vec3, Vec4)
 
 data FieldConstants = FieldConstants
   { fcWavenumber :: !RealT,
@@ -51,7 +50,7 @@ integrateTrajectories (initialPositions, initialMomenta) =
       finalVariables = VU.concat processedChunks
    in VU.unzip finalVariables
 
-chunksOf :: VU.Unbox a => Int -> VU.Vector a -> [VU.Vector a]
+chunksOf :: (VU.Unbox a) => Int -> VU.Vector a -> [VU.Vector a]
 chunksOf size v
   | VU.null v = []
   | otherwise = let (h, t) = VU.splitAt size v in h : chunksOf size t
@@ -177,16 +176,8 @@ computeAcceleration momentum e b =
       ax = gamma * ex / c + py * bz - pz * by
       ay = gamma * ey / c - px * bz + pz * bx
       az = gamma * ez / c + px * by - py * bx
-  in V4
-      (chargeToMassRatio * agamma)
-      (chargeToMassRatio * ax)
-      (chargeToMassRatio * ay)
-      (chargeToMassRatio * az)
-
-computeAngularMomentumInZDirection :: Position -> Momentum -> AngularMomentum
-computeAngularMomentumInZDirection (Position (V4 _ x y _)) (Momentum (V4 _ vx vy _)) =
-  AngularMomentum $ x * vy - y * vx
-
-computeAngularMomentaInZDirection :: (Vector Position, Vector Momentum) -> Vector AngularMomentum
-computeAngularMomentaInZDirection (positions, momenta) =
-  VU.zipWith computeAngularMomentumInZDirection positions momenta
+   in V4
+        (chargeToMassRatio * agamma)
+        (chargeToMassRatio * ax)
+        (chargeToMassRatio * ay)
+        (chargeToMassRatio * az)
