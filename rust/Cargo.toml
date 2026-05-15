@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-fork_union = "2.3.1"
 nalgebra = "0.34.2"
 npyz = "0.9.1"
 num = "0.4.3"
@@ -15,3 +14,10 @@ rand = "0.10.1"
 opt-level = 3
 codegen-units = 1
 lto = "fat"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+debug = true

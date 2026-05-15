@@ -1,3 +1,5 @@
+use std::{cmp::min, thread, time::Instant};
+
 use nalgebra::vector;
 
 use crate::{
@@ -36,30 +38,51 @@ pub fn integrate_trajectories(initial_conditions: InitialConditions) -> Integrat
     let num_threads = num_cpus::get();
     println!("Running in parallel on {} cores", num_threads);
 
-    let mut thread_pool = fork_union::spawn(num_threads);
+    let mut join_handles = Vec::with_capacity(num_threads);
 
-    thread_pool.for_n(NUM_PARTICLES, |prong| {
-        let particle_index = prong.task_index;
+    let particle_batch_size = NUM_PARTICLES / num_threads + 1;
 
-        let positions;
-        let momenta;
+    for thread_index in 0..num_threads {
+        let start_index = particle_batch_size * thread_index;
+        let end_index = min(start_index + particle_batch_size, NUM_PARTICLES - 1);
+        let join_handle = thread::spawn(move || {
+            let positions;
+            let momenta;
 
-        unsafe {
-            positions = &mut *(positions_ptr as *mut Vec<Vec4>);
-            momenta = &mut *(momenta_ptr as *mut Vec<Vec4>);
-        }
+            unsafe {
+                positions = &mut *(positions_ptr as *mut Vec<Vec4>);
+                momenta = &mut *(momenta_ptr as *mut Vec<Vec4>);
+            }
 
-        for _integration_step in 0..NUM_INTEGRATION_STEPS {
-            let previous_position = positions[particle_index];
-            let previous_momentum = momenta[particle_index];
+            for particle_index in start_index..end_index {
+                for _integration_step in 0..NUM_INTEGRATION_STEPS {
+                    let previous_position = positions[particle_index];
+                    let previous_momentum = momenta[particle_index];
 
-            let (new_position, new_momentum) =
-                perform_integration_step(previous_position, previous_momentum);
+                    let (new_position, new_momentum) =
+                        perform_integration_step(previous_position, previous_momentum);
 
-            positions[particle_index] = new_position;
-            momenta[particle_index] = new_momentum;
-        }
-    });
+                    positions[particle_index] = new_position;
+                    momenta[particle_index] = new_momentum;
+                }
+            }
+        });
+        join_handles.push(join_handle);
+    }
+
+    let start_time = Instant::now();
+
+    join_handles
+        .into_iter()
+        .for_each(|handle| handle.join().expect("Error while joining thread"));
+
+    let duration = start_time.elapsed();
+
+    println!(
+        "Integrating {} trajectories took {} seconds",
+        NUM_PARTICLES,
+        duration.as_secs_f64()
+    );
 
     IntegrationResult { positions, momenta }
 }

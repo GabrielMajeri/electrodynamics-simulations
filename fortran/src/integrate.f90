@@ -51,7 +51,7 @@ contains
       duration = real(end_time - start_time, dp)/rate
 
       write(*, '("Done integrating trajectories")')
-      write(*, '("Took ", F14.10, " seconds")') duration
+      write(*, '("Took ", F8.6, " seconds")') duration
 
       final_positions = positions
       final_momenta = momenta

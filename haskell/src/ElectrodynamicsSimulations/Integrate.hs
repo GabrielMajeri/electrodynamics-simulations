@@ -121,7 +121,7 @@ computeLaguerreGaussElectricAndMagneticField !(FieldConstants wn _ rl absL sq2 a
           else (xx + yy) / (2 * radiusOfCurvature)
       gouyPhase = atan2 z rl
 
-      polynomialPart = laguerrePolynomialSpecialized (fromIntegral absL) (2 * rOverWidthSquared)
+      polynomialPart = laguerrePolynomial radialIndex (fromIntegral absL) (2 * rOverWidthSquared)
       exponentialDecay = exp (-rOverWidthSquared)
       magnitude = abw * (1 / width) * (sq2 * rOverWidth) ^ absL * polynomialPart * exponentialDecay
 
@@ -154,9 +154,12 @@ computeLaguerreGaussElectricAndMagneticField !(FieldConstants wn _ rl absL sq2 a
       b = V3 bxReal byReal bzReal
    in (e, b)
 
-laguerrePolynomialSpecialized :: RealT -> RealT -> RealT
-laguerrePolynomialSpecialized !alpha !x =
-  0.5 * (x * x - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
+laguerrePolynomial :: Integer -> RealT -> RealT -> RealT
+laguerrePolynomial n alpha x
+  | n == 0 = 1
+  | n == 1 = 1 + alpha - x
+  | n == 2 = 0.5 * (x * x - 2 * (alpha + 2) * x + (alpha + 1) * (alpha + 2))
+  | otherwise = error "Laguerre polynomial of order greater than 2 is not implemented"
 
 computeAcceleration :: Vec4 -> Vec3 -> Vec3 -> Vec4
 computeAcceleration momentum e b =

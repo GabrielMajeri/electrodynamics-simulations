@@ -16,7 +16,7 @@ const TOLERANCE: Real = 1e-8;
 /// Computes the electric and magnetic field vectors for a laser beam of Laguerre-Gauss shape,
 /// at the given spatial position and time.
 pub fn laguerre_gauss_beam_electric_and_magnetic_field(position: Vec3, time: Real) -> (Vec3, Vec3) {
-    let rho = position.x.hypot(position.y);
+    let rho = (position.x * position.x + position.y * position.y).sqrt();
     let phi = position.y.atan2(position.x);
     let x = position.x;
     let y = position.y;

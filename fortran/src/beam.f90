@@ -32,7 +32,7 @@ contains
       y = position%y
       z = position%z
 
-      rho = hypot(x, y)
+      rho = sqrt(x**2 + y**2)
       phi = atan2(y, x)
 
       !> w(z)

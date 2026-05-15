@@ -48,17 +48,7 @@ fn main() {
         duration.as_secs_f64()
     );
 
-    let start_time = Instant::now();
-
     let integration_result = integrate_trajectories(initial_conditions);
-
-    let duration = start_time.elapsed();
-
-    println!(
-        "Integrating {} trajectories took {} seconds",
-        NUM_PARTICLES,
-        duration.as_secs_f64()
-    );
 
     let angular_momenta = compute_angular_momenta_in_z_direction(
         &integration_result.positions,
