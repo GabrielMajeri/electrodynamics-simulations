@@ -22,6 +22,7 @@ Position operator+(Position p, Momentum m)
     return {p.t + m.gamma, p.x + m.vx, p.y + m.vy, p.z + m.vz};
 }
 
+OPENACC_ROUTINE
 Real Vector3D::norm() const
 {
     return std::sqrt(x * x + y * y + z * z);
@@ -47,6 +48,7 @@ Vector3D operator/(Vector3D v, Real scalar)
     return {v.x / scalar, v.y / scalar, v.z / scalar};
 }
 
+OPENACC_ROUTINE
 ComplexVector3D &ComplexVector3D::operator+=(ComplexVector3D v) noexcept
 {
     x += v.x;

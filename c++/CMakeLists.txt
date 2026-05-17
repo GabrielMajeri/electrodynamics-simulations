@@ -27,6 +27,9 @@ target_sources(LaguerreGaussBeamAngularMomentumTransfer
 # Use a modern C++ standard
 set_property(TARGET LaguerreGaussBeamAngularMomentumTransfer PROPERTY CXX_STANDARD 20)
 
+# Link against the math library
+target_link_libraries(LaguerreGaussBeamAngularMomentumTransfer m)
+
 set(USE_OPENMP TRUE CACHE BOOL "Enable OpenMP support")
 set(USE_OPENACC FALSE CACHE BOOL "Enable OpenACC support")
 

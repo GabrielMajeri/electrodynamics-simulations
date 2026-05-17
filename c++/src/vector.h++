@@ -70,7 +70,6 @@ struct ComplexVector3D
         return {source.x, source.y, source.z};
     }
 
-    OPENACC_ROUTINE
     ComplexVector3D &operator+=(ComplexVector3D v) noexcept;
 };
 
