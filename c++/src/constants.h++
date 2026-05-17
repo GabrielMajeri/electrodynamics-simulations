@@ -48,5 +48,8 @@ constexpr auto phi_0 = 3 * tau_0;
 constexpr Real integration_start_time = 0.0, integration_end_time = 6 * tau_0;
 constexpr Real integration_time_step = 1e-1;
 
-constexpr std::size_t num_detector_points = 512;
-constexpr Real detector_length = 2500 * lambda;
+constexpr std::size_t detector_grid_size_x = 64;
+constexpr std::size_t detector_grid_size_y = 64;
+constexpr std::size_t num_detector_points = detector_grid_size_x * detector_grid_size_y;
+constexpr Real detector_width = 2500 * lambda;
+constexpr Real detector_height = 2500 * lambda;

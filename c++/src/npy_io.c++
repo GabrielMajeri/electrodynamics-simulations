@@ -49,8 +49,15 @@ void write_npy_file(const char *file_path, const std::vector<T> &array)
     dictionary.reserve(128);
 
     std::stringstream ss;
-    ss << "<f";
-    ss << sizeof(Real);
+    constexpr bool is_complex = std::is_same_v<ComplexVector3D, T>;
+    if (is_complex)
+    {
+        ss << "<c" << sizeof(Complex);
+    }
+    else
+    {
+        ss << "<f" << sizeof(Real);
+    }
 
     dictionary += "{'descr':";
     dictionary.push_back('\'');
@@ -66,7 +73,16 @@ void write_npy_file(const char *file_path, const std::vector<T> &array)
     ss.str("");
     ss.clear();
 
-    ss << '(' << array.size() << ',' << (sizeof(T) / sizeof(Real)) << ')';
+    ss << '(' << array.size() << ',';
+    if (is_complex)
+    {
+        ss << (sizeof(T) / sizeof(Complex));
+    }
+    else
+    {
+        ss << (sizeof(T) / sizeof(Real));
+    }
+    ss << ')';
 
     dictionary += ss.str().data();
 

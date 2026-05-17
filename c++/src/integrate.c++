@@ -38,10 +38,14 @@ IntegrationResult integrate_trajectories(
     std::vector<Vector3D> detector_positions(num_detector_points);
     constexpr auto detector_z = 1000 * lambda;
 
-    for (std::size_t i = 0; i < num_detector_points; ++i)
+    for (std::size_t row = 0; row < detector_grid_size_y; ++row)
     {
-        const auto x = -detector_length + i * (2 * detector_length) / num_detector_points;
-        detector_positions[i] = {x, 0, detector_z};
+        for (std::size_t column = 0; column < detector_grid_size_x; ++column)
+        {
+            const auto y = -detector_height + row * (2 * detector_height) / detector_grid_size_y;
+            const auto x = -detector_width + column * (2 * detector_width) / detector_grid_size_x;
+            detector_positions[row * detector_grid_size_x + column] = {x, y, detector_z};
+        }
     }
 
     std::vector<ComplexVector3D> electric_field(num_detector_points), magnetic_field(num_detector_points);
