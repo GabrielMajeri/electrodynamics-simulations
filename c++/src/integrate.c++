@@ -8,6 +8,19 @@
 
 using namespace std::complex_literals;
 
+#ifdef _OPENMP
+static void field_add(std::vector<ComplexVector3D> &inout, const std::vector<ComplexVector3D> &in)
+{
+    for (std::size_t i = 0; i < in.size(); ++i)
+    {
+        inout[i] += in[i];
+    }
+}
+#pragma omp declare reduction(                                                 \
+        field_add : std::vector<ComplexVector3D> : field_add(omp_out, omp_in)) \
+    initializer(omp_priv = omp_orig)
+#endif
+
 IntegrationResult integrate_trajectories(
     std::vector<Position> initial_positions, std::vector<Momentum> initial_momenta)
 {
@@ -37,7 +50,7 @@ IntegrationResult integrate_trajectories(
     Momentum *momenta_arr = momenta.data();
 
 #ifdef _OPENMP
-#pragma omp parallel for
+#pragma omp parallel for reduction(field_add : electric_field)
 #else
 #ifdef _OPENACC
 #pragma acc parallel loop copy(positions_arr[ : num_particles], momenta_arr[ : num_particles])
@@ -45,8 +58,6 @@ IntegrationResult integrate_trajectories(
 #endif
     for (std::size_t particle_index = 0; particle_index < num_particles; ++particle_index)
     {
-        std::vector<ComplexVector3D> particle_electric_field(num_detector_points);
-
         auto current_time = 0.0;
         for (std::size_t step = 0; step <= num_steps; ++step)
         {
@@ -91,22 +102,13 @@ IntegrationResult integrate_trajectories(
                 const auto second_term = ComplexVector3D::from(view_direction / (displacement_norm * displacement_norm));
 
                 // Riemann summation
-                particle_electric_field[detector_index] += integration_time_step * oscillatory_kernel * (first_term + second_term);
+                electric_field[detector_index] += integration_time_step * oscillatory_kernel * (first_term + second_term);
             }
 
             positions_arr[particle_index] = new_position;
             momenta_arr[particle_index] = new_momentum;
 
             current_time += integration_time_step;
-        }
-
-#pragma omp critical
-        {
-            // std::cout << "Adding up contributions from particle with index " << particle_index << std::endl;
-            for (std::size_t detector_index = 0; detector_index < num_detector_points; ++detector_index)
-            {
-                electric_field[detector_index] += particle_electric_field[detector_index];
-            }
         }
     }
 
