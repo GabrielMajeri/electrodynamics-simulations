@@ -11,6 +11,7 @@ class CircularTrajectories(NamedTuple):
     timestamps: RealArray
     centers: RealArray
     trajectories: RealArray
+    velocities: RealArray
 
 
 def simulate_circular_trajectories(
@@ -75,6 +76,19 @@ def simulate_circular_trajectories(
         * np.sin(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
     )
 
+    velocities = np.empty((num_particles, num_timestamps, 3))
+    velocities[:, :, 0] = (
+        -amplitude
+        * omega_laser
+        * np.sin(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
+    )
+    velocities[:, :, 1] = (
+        amplitude
+        * omega_laser
+        * np.cos(omega_laser * timestamps[np.newaxis, :] - phi_0[:, np.newaxis])
+    )
+    velocities[:, :, 2] = 0
+
     # TODO: turn into a configurable parameter
     random_vertical_offsets = False
     if random_vertical_offsets:
@@ -88,4 +102,6 @@ def simulate_circular_trajectories(
     else:
         trajectories[:, :, 2] = 0
 
-    return CircularTrajectories(integration_duration, timestamps, centers, trajectories)
+    return CircularTrajectories(
+        integration_duration, timestamps, centers, trajectories, velocities
+    )
