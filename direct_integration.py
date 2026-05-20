@@ -6,10 +6,10 @@ import matplotlib.pyplot as plt
 
 from electrodynamics.constants import num_particles, c, omega_laser, lmbd
 from electrodynamics.trajectories import simulate_circular_trajectories
-from electrodynamics.utils import Array
+from electrodynamics.typing import RealArray
 
 
-def plot_configuration(trajectories: Array, detector_positions: Array) -> None:
+def plot_configuration(trajectories: RealArray, detector_positions: RealArray) -> None:
     "Plot the current simulated setup (particles and detector)."
 
     fig = plt.figure()
@@ -40,7 +40,7 @@ def plot_configuration(trajectories: Array, detector_positions: Array) -> None:
 
 
 def plot_particle_trajectory(
-    particle_displacements: Array, particle_index: int
+    particle_displacements: RealArray, particle_index: int
 ) -> None:
     plt.title(f"$r_0(t)$ for particle #{particle_index + 1}")
 
@@ -80,8 +80,8 @@ if __name__ == "__main__":
 
     # Linearly displaced detector points
     detector_positions[:, 0] = np.linspace(
-        -30 * large_circle_radius,
-        30 * large_circle_radius,
+        -50 * large_circle_radius,
+        50 * large_circle_radius,
         detector_positions.shape[0],
     )
 
@@ -104,9 +104,8 @@ if __name__ == "__main__":
     if True:
         plot_particle_trajectory(particle_displacements, 0)
 
-    print("x shape:", detector_positions.shape)
-    print("r(t) shape:", particle_displacements.shape)
-    # exit(0)
+    # print("x shape:", detector_positions.shape)
+    # print("r(t) shape:", particle_displacements.shape)
 
     # Compute relative trajectories (with respect to each detector positions)
     # R(x_0, t) = x_0 - r_0(t) = (x - R_0) - (r(t) - R_0) = x - r(t)
@@ -115,7 +114,7 @@ if __name__ == "__main__":
         - particle_displacements[np.newaxis, :, :, :]
     )
 
-    print("R(x_0, t) shape:", Rs.shape)
+    # print("R(x_0, t) shape:", Rs.shape)
 
     R_norms = np.linalg.vector_norm(Rs, axis=-1)
 
@@ -123,39 +122,13 @@ if __name__ == "__main__":
     # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
     ns = Rs / np.expand_dims(R_norms, -1)
 
-    print("n(x_0, t) shape:", ns.shape)
+    # print("n(x_0, t) shape:", ns.shape)
 
     print()
     print("Checking for faster-than-light particles...")
 
-    print("r(t_2000) =", particle_displacements[0, 2000, :])
-    print("r(t_2001) =", particle_displacements[0, 2001, :])
-    print(
-        "|dx| = |r(t_2001) - r(t_2000)| =",
-        np.linalg.vector_norm(
-            particle_displacements[0, 2001, :] - particle_displacements[0, 2000, :]
-        ),
-    )
-    print("dt =", timestamps[2001] - timestamps[2000])
-
-    print(
-        "dx/dt =",
-        np.abs(
-            np.linalg.vector_norm(
-                particle_displacements[0, 2000, :] - particle_displacements[0, 2001, :]
-            )
-            / (timestamps[2001] - timestamps[2000])
-        ),
-    )
-
-    print()
-
     particle_velocities = np.gradient(particle_displacements, timestamps, axis=1)
-
-    print("v(t) shape:", particle_velocities.shape)
-
-    # TODO: fix
-    # assert np.all(particle_velocities <= c), "Particles are moving faster than light!"
+    assert np.all(particle_velocities <= c), "Particles are moving faster than light!"
 
     relativistic_factor = particle_velocities / c
 
@@ -175,19 +148,22 @@ if __name__ == "__main__":
 
     print("Computing first term of the integrand (1/|R|)")
 
-    # ((i * omega)/c) * (beta(t) - n(x_0, t))/|R(x_0, t)|
+    # ((i * omega)/c) * (beta(t) - n(x_0, t) * (dot(n, beta)))/|R(x_0, t)|
     integrand_first_term = (
         ((1j * frequency) / c)
-        * (relativistic_factor - ns)
+        * (
+            relativistic_factor
+            - ns * np.expand_dims(np.linalg.vecdot(ns, relativistic_factor), axis=-1)
+        )
         / np.expand_dims(R_norms, axis=-1)
     )
 
-    print("Computing second term of the integrand (1/|R|^2)")
+    # print("Computing second term of the integrand (1/|R|^2)")
 
-    # n(x_0, t)/|R(x_0, t)|^2
-    integrand_second_term = ns / np.expand_dims(np.square(R_norms), axis=-1)
+    # # n(x_0, t)/|R(x_0, t)|^2
+    # integrand_second_term = ns / np.expand_dims(np.square(R_norms), axis=-1)
 
-    print("Summing up results")
+    print("Summing up results (computing Riemann integral)")
 
     dt = timestamps[1] - timestamps[0]
 
@@ -198,15 +174,16 @@ if __name__ == "__main__":
         # * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
         axis=-2,
     )
-    second_term = dt * np.sum(
-        oscillatory_kernel * integrand_second_term,
-        # * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
-        axis=-2,
-    )
+    # TODO: compute second term using alternative formula
+    # second_term = dt * np.sum(
+    #     oscillatory_kernel * integrand_second_term,
+    #     # * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
+    #     axis=-2,
+    # )
 
     # Now sum up each particle's contribution
     first_term = np.sum(first_term, axis=-2)
-    second_term = np.sum(second_term, axis=-2)
+    # second_term = np.sum(second_term, axis=-2)
 
     final_time = perf_counter()
     total_duration = final_time - initial_time
@@ -217,23 +194,23 @@ if __name__ == "__main__":
     # Plot terms' magnitude
 
     first_term_norms = np.linalg.vector_norm(first_term, axis=-1)
-    second_term_norms = np.linalg.vector_norm(second_term, axis=-1)
+    # second_term_norms = np.linalg.vector_norm(second_term, axis=-1)
 
-    fig, axes = plt.subplots(1, 2, figsize=(8, 5))
+    fig, ax = plt.subplots(1, 1)  # , figsize=(8, 5))
 
-    plt.suptitle("Electric field $E(x_0, \\omega)$")
+    plt.suptitle("Electric field spectral intensity $|E(x_0, \\omega)|$")
 
-    axes[0].set_title("First term ($1/|R|$)")
-    axes[0].plot(first_term_norms)
-    axes[0].grid()
-    axes[0].set_xlabel("Detector position")
-    axes[0].set_ylabel("Electric vector field norm")
+    ax.set_title("First-order term ($1/|R|$)")
+    ax.plot(detector_positions[:, 0], first_term_norms)
+    ax.grid()
+    ax.set_xlabel("Detector position")
+    ax.set_ylabel("Electric vector field norm")
 
-    axes[1].set_title("Second term ($1/|R|^2$)")
-    axes[1].plot(second_term_norms, color="orange")
-    axes[1].grid()
-    axes[1].set_xlabel("Detector position")
-    axes[1].set_ylabel("Electric vector field norm")
+    # axes[1].set_title("Second term ($1/|R|^2$)")
+    # axes[1].plot(second_term_norms, color="orange")
+    # axes[1].grid()
+    # axes[1].set_xlabel("Detector position")
+    # axes[1].set_ylabel("Electric vector field norm")
 
     plt.tight_layout()
     fig.savefig("plots/electric_field_magnitudes.pdf")

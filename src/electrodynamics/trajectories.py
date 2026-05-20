@@ -3,14 +3,14 @@ from typing import NamedTuple
 import numpy as np
 
 from .constants import num_particles, omega_laser, c, lmbd
-from .utils import Array
+from .typing import RealArray
 
 
 class CircularTrajectories(NamedTuple):
     integration_duration: float
-    timestamps: Array
-    centers: Array
-    trajectories: Array
+    timestamps: RealArray
+    centers: RealArray
+    trajectories: RealArray
 
 
 def simulate_circular_trajectories(
@@ -52,7 +52,7 @@ def simulate_circular_trajectories(
         -1 / (((integration_duration - timestamps) / slope + 1e-10) ** 2)
     )
 
-    trajectory_radius = 0.75 * lmbd
+    trajectory_radius = (0.1 / (2 * np.pi)) * lmbd
     amplitude = trajectory_radius * cutoff
 
     # Compute instantaneous velocities and make sure we don't go faster than the speed of light

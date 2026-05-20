@@ -38,14 +38,10 @@ IntegrationResult integrate_trajectories(
     std::vector<Vector3D> detector_positions(num_detector_points);
     constexpr auto detector_z = 1000 * lambda;
 
-    for (std::size_t row = 0; row < detector_grid_size_y; ++row)
+    for (std::size_t index = 0; index < detector_grid_size_x; ++index)
     {
-        for (std::size_t column = 0; column < detector_grid_size_x; ++column)
-        {
-            const auto y = -detector_height + row * (2 * detector_height) / detector_grid_size_y;
-            const auto x = -detector_width + column * (2 * detector_width) / detector_grid_size_x;
-            detector_positions[row * detector_grid_size_x + column] = {x, y, detector_z};
-        }
+        const auto x = -detector_width + index * (2 * detector_width) / detector_grid_size_x;
+        detector_positions[index] = {x, 0, detector_z};
     }
 
     std::vector<ComplexVector3D> electric_field(num_detector_points), magnetic_field(num_detector_points);
@@ -97,16 +93,22 @@ IntegrationResult integrate_trajectories(
                 // v/c
                 const auto beta = particle_velocity / c;
 
-                // O(1/|R|) term
-                // ((i * omega) / c) * (beta(t) - n(x_0, t)) / |R(x_0, t)|
-                const auto first_term = ((1i * omega) / c) * ComplexVector3D::from((beta - view_direction) / displacement_norm);
+                // // O(1/|R|) term
+                // // ((i * omega) / c) * (beta(t) - n(x_0, t)) / |R(x_0, t)|
+                // const auto first_term = ((1i * omega) / c) * ComplexVector3D::from((beta - view_direction) / displacement_norm);
 
-                // O(1/|R|^2) term
-                // n(x_0, t) / |R(x_0, t)|^2
-                const auto second_term = ComplexVector3D::from(view_direction / (displacement_norm * displacement_norm));
+                // // O(1/|R|^2) term
+                // // n(x_0, t) / |R(x_0, t)|^2
+                // const auto second_term = ComplexVector3D::from(view_direction / (displacement_norm * displacement_norm));
+
+                // // Riemann summation
+                // electric_field[detector_index] += integration_time_step * oscillatory_kernel * (first_term + second_term);
+
+                // ((i * omega) / c) * (beta(t) - n(x_0, t) * dot(beta, n)) / |R(x_0, t)|
+                const auto first_term = ((1i * omega) / c) * ComplexVector3D::from((beta - view_direction * beta.dot(view_direction)) / displacement_norm);
 
                 // Riemann summation
-                electric_field[detector_index] += integration_time_step * oscillatory_kernel * (first_term + second_term);
+                electric_field[detector_index] += integration_time_step * oscillatory_kernel * first_term;
             }
 
             positions_arr[particle_index] = new_position;

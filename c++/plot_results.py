@@ -28,18 +28,10 @@ fig.savefig(plots_directory / "initial_electron_positions.png")
 detector_positions = np.load("detector_positions.npy")
 electric_field = np.load("electric_field.npy")
 
-n = detector_positions.shape[0]
-detector_grid_size_x = int(np.sqrt(n))
-detector_grid_size_y = int(np.sqrt(n))
-detector_positions = detector_positions.reshape(
-    detector_grid_size_y, detector_grid_size_x, 3
-)
-electric_field = electric_field.reshape(detector_grid_size_y, detector_grid_size_x, 3)
-
 print("Plotting final state detected electric field")
 fig = plt.figure(figsize=(10, 6))
 fig.suptitle("Re-emitted radiation electric field")
-plt.imshow(np.linalg.vector_norm(electric_field, axis=-1))
+plt.plot(detector_positions[:, 0], np.linalg.vector_norm(electric_field, axis=-1))
 plt.xlabel("Detector $x$ coordinate")
 plt.ylabel("$E(x_0)$")
 plt.grid()

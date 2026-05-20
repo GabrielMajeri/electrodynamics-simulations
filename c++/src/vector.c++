@@ -23,9 +23,15 @@ Position operator+(Position p, Momentum m)
 }
 
 OPENACC_ROUTINE
-Real Vector3D::norm() const
+Real Vector3D::dot(const Vector3D &rhs) const noexcept
 {
-    return std::sqrt(x * x + y * y + z * z);
+    return x * rhs.x + y * rhs.y + z * rhs.z;
+}
+
+OPENACC_ROUTINE
+Real Vector3D::norm() const noexcept
+{
+    return std::sqrt(dot(*this));
 }
 
 Vector3D Vector3D::normalized() const
@@ -41,6 +47,11 @@ Vector3D operator-(Vector3D v, Vector3D w)
 Vector3D operator*(Real scalar, Vector3D v)
 {
     return {scalar * v.x, scalar * v.y, scalar * v.z};
+}
+
+Vector3D operator*(Vector3D v, Real scalar)
+{
+    return scalar * v;
 }
 
 Vector3D operator/(Vector3D v, Real scalar)

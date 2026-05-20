@@ -48,7 +48,8 @@ struct Vector3D
         return Vector3D(momentum.vx, momentum.vy, momentum.vz);
     }
 
-    Real norm() const;
+    Real dot(const Vector3D &rhs) const noexcept;
+    Real norm() const noexcept;
     Vector3D normalized() const;
 };
 
@@ -57,6 +58,9 @@ Vector3D operator-(Vector3D v, Vector3D w);
 
 OPENACC_ROUTINE
 Vector3D operator*(Real scalar, Vector3D v);
+
+OPENACC_ROUTINE
+Vector3D operator*(Vector3D v, Real scalar);
 
 OPENACC_ROUTINE
 Vector3D operator/(Vector3D v, Real scalar);
