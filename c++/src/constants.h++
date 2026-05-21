@@ -15,9 +15,10 @@ constexpr Real c = 137.036;
 #pragma acc declare copyin(c)
 #endif
 
+constexpr size_t num_electrons = 30;
 // constexpr size_t num_electrons = 4 * 1024;
 // constexpr size_t num_electrons = 16 * 1024;
-constexpr std::size_t num_electrons = 64 * 1024;
+// constexpr std::size_t num_electrons = 64 * 1024;
 // constexpr std::size_t num_electrons = 128 * 1024;
 
 constexpr Real omega = 0.057;
@@ -25,6 +26,8 @@ constexpr Real angular_velocity = omega;
 constexpr Real lambda = 2 * pi * c / omega;
 constexpr Real wavelength = lambda;
 constexpr Real waist_radius = 75 * lambda;
+
+constexpr Real large_circle_radius = 50 * lambda;
 
 // TODO: fix convergence issues for larger values of a_0
 constexpr Real a_0 = 1e-2;
@@ -48,8 +51,14 @@ constexpr Real disk_radius = (1.75 + radial_index) * waist_radius;
 constexpr auto tau_0 = 10 / omega;
 constexpr auto phi_0 = 3 * tau_0;
 
-constexpr Real integration_start_time = 0.0, integration_end_time = 6 * tau_0;
+constexpr bool use_analytic_trajectories = true;
+
+// constexpr Real integration_start_time = 0.0, integration_end_time = 6 * tau_0;
+constexpr Real integration_start_time = 0.0, integration_end_time = 40 * (2 * pi) / omega;
 constexpr Real integration_time_step = 1e-1;
+
+constexpr Real integration_duration = integration_end_time - integration_start_time;
+constexpr std::size_t num_steps = integration_duration / integration_time_step;
 
 constexpr std::size_t detector_grid_size_x = 256;
 constexpr std::size_t num_detector_points = detector_grid_size_x;

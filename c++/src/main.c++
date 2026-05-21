@@ -65,7 +65,7 @@ int main()
     start = std::chrono::steady_clock::now();
 
     const auto integration_result =
-        integrate_trajectories(initial_electron_positions, initial_electron_momenta);
+        use_analytic_trajectories ? analytic_trajectories(initial_electron_positions) : integrate_trajectories(initial_electron_positions, initial_electron_momenta);
 
     finish = std::chrono::steady_clock::now();
     elapsed_seconds = finish - start;
@@ -76,6 +76,9 @@ int main()
     // BUGFIX: if I don't shutdown OpenACC explicitly here, it crashes (returns a non-zero exit code) at program exit
     acc_shutdown(acc_get_device_type());
 #endif
+
+    std::cout << "Writing sample particle trajectory to disk..." << std::endl;
+    write_npy_file("particle_trajectory.npy", integration_result.particle_trajectory);
 
     std::cout << "Writing emitted electric and magnetic fields to disk..." << std::endl;
     write_npy_file("detector_positions.npy", integration_result.detector_positions);

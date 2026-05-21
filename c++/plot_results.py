@@ -25,6 +25,26 @@ plot_particle_positions(fig, initial_positions[:, 1:4])
 fig.savefig(plots_directory / "initial_electron_positions.png")
 
 
+particle_trajectory = np.load("particle_trajectory.npy")
+
+print("Plotting sample electron trajectory")
+
+fig, ax = plt.subplots(figsize=(10, 6))
+fig.suptitle("Electron trajectory")
+
+ax.plot(particle_trajectory[:, 1] - np.mean(particle_trajectory[:, 1]), label="x")
+ax.plot(particle_trajectory[:, 2] - np.mean(particle_trajectory[:, 2]), label="y")
+
+ax.set_xlabel("Time $t$")
+ax.set_ylabel("Displacement")
+
+fig.legend()
+ax.grid()
+fig.tight_layout()
+
+fig.savefig(plots_directory / "electron_trajectory.png")
+
+
 detector_positions = np.load("detector_positions.npy")
 electric_field = np.load("electric_field.npy")
 
