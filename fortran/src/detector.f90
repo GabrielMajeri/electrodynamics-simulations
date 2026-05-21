@@ -9,7 +9,7 @@ contains
    pure subroutine initialize_detector_positions(detector_positions)
       real(kind=dp), allocatable, intent(out) :: detector_positions(:, :)
 
-      real(kind=dp) :: x, y, z
+      real(kind=dp) :: f, x, y, z
       integer :: detector_index
 
       allocate(detector_positions(1:3, 1:num_detector_points))
@@ -18,7 +18,8 @@ contains
       z = 1000 * lambda
 
       do detector_index = 1, num_detector_points
-         x = - detector_width + (real(detector_index, kind=dp) / num_detector_points) * (2 * detector_width)
+         f = real(detector_index - 1, kind=dp) / real(num_detector_points - 1, kind=dp)
+         x = - detector_width + f * (2 * detector_width)
 
          detector_positions(:, detector_index) = [x, y, z]
       end do

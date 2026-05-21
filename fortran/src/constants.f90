@@ -6,10 +6,10 @@ module constants
    public
 
    !> Number of electrons
-   integer, parameter :: num_particles = 4 * 1024
+   integer, parameter :: num_particles = 8 * 1024
 
    !> Number of points on the simulated 1D detector
-   integer, parameter :: num_detector_points = 256
+   integer, parameter :: num_detector_points = 512
 
    !> Circle constant PI
    real(real_kind), parameter :: pi = 4 * atan(1.0)
@@ -49,6 +49,9 @@ module constants
    !> Radius at beam waist (z = 0)
    real(real_kind), parameter :: waist_radius = 75 * lambda
 
+   !> Radius of circle on which initial conditions lie (for circularly distributed ICs)
+   real(real_kind), parameter :: large_circle_radius = 50 * lambda
+
    !> Radius of disk in which initial conditions lie
    real(real_kind), parameter :: disk_radius = (1.75 + radial_index) * waist_radius
 
@@ -58,8 +61,12 @@ module constants
 
    real(real_kind), parameter :: integration_start_time = 0.0
    real(real_kind), parameter :: integration_end_time = 6 * tau_0
-   real(real_kind), parameter :: integration_time_step = 1e-1
+
    real(real_kind), parameter :: integration_duration = integration_end_time - integration_start_time
+
+   real(real_kind), parameter :: integration_time_step = 1e-1
+
+   integer, parameter :: num_integration_steps = int(integration_duration / integration_time_step) + 1
 
    complex(real_kind), parameter :: polarization_x = complex(1/sqrt(2.0_real_kind), 0)
    complex(real_kind), parameter :: polarization_y = complex(0, 1/sqrt(2.0_real_kind))
