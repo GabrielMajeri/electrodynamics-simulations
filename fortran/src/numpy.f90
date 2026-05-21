@@ -6,10 +6,40 @@ module numpy
 
    integer, parameter :: k = kind(0.0_dp)
 
+   interface write_to_npy_file
+      module procedure :: write_real_rank_1_to_npy_file
+      module procedure :: write_real_rank_2_to_npy_file
+      module procedure :: write_complex_rank_2_to_npy_file
+   end interface
+
 contains
+   !> Write a rank-1 real array to disk in NPY format.
+   subroutine write_real_rank_1_to_npy_file(path, array)
+      character(len=*), intent(in) :: path
+      real(kind=k), intent(in) :: array(:)
+      character(len=8) :: dtype
+      integer :: io
+
+      ! Open the file for writing (create/overwrite it)
+      open(newunit=io, file=path, &
+         status="replace", action="write", &
+         form="unformatted", access="stream")
+
+      ! Construct the dtype string
+      write (dtype, "(A,I0)") "<f", storage_size(1_dp, dp) / 8
+
+      ! Write magic string, version number and array shape and format
+      write(io) npy_header(dtype(1:len_trim(dtype)), .true., shape(array))
+
+      ! Write the array to disk
+      write(io) array
+
+      close(io)
+
+   end subroutine write_real_rank_1_to_npy_file
 
    !> Write a rank-2 array to disk in NPY format.
-   subroutine write_to_npy_file(path, array)
+   subroutine write_real_rank_2_to_npy_file(path, array)
       character(len=*), intent(in) :: path
       real(kind=k), intent(in) :: array(:, :)
       character(len=8) :: dtype
@@ -31,7 +61,32 @@ contains
 
       close(io)
 
-   end subroutine write_to_npy_file
+   end subroutine write_real_rank_2_to_npy_file
+
+   !> Write a rank-2 complex array to disk in NPY format.
+   subroutine write_complex_rank_2_to_npy_file(path, array)
+      character(len=*), intent(in) :: path
+      complex(kind=k), intent(in) :: array(:, :)
+      character(len=8) :: dtype
+      integer :: io
+
+      ! Open the file for writing (create/overwrite it)
+      open(newunit=io, file=path, &
+         status="replace", action="write", &
+         form="unformatted", access="stream")
+
+      ! Construct the dtype string
+      write (dtype, "(A,I0)") "<c", 2 * storage_size(1_dp, dp) / 8
+
+      ! Write magic string, version number and array shape and format
+      write(io) npy_header(dtype(1:len_trim(dtype)), .true., shape(array))
+
+      ! Write the array to disk
+      write(io) array
+
+      close(io)
+
+   end subroutine write_complex_rank_2_to_npy_file
 
    function npy_header(dtype, fortran_order, array_shape)
       character(len=*), intent(in) :: dtype

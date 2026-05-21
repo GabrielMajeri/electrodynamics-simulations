@@ -6,7 +6,10 @@ module constants
    public
 
    !> Number of electrons
-   integer, parameter :: num_particles = 64 * 1024
+   integer, parameter :: num_particles = 4 * 1024
+
+   !> Number of points on the simulated 1D detector
+   integer, parameter :: num_detector_points = 256
 
    !> Circle constant PI
    real(real_kind), parameter :: pi = 4 * atan(1.0)
@@ -60,5 +63,7 @@ module constants
 
    complex(real_kind), parameter :: polarization_x = complex(1/sqrt(2.0_real_kind), 0)
    complex(real_kind), parameter :: polarization_y = complex(0, 1/sqrt(2.0_real_kind))
+
+   real(real_kind), parameter :: detector_width = 2500 * lambda
 
 end module constants

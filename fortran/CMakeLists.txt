@@ -20,6 +20,7 @@ target_sources(LaguerreGaussBeamAngularMomentumTransfer
         src/types.f90
         src/vector.f90
         src/initial_conditions_generation.f90
+        src/detector.f90
         src/numpy.f90
         src/beam.f90
         src/integrate.f90

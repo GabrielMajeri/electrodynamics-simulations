@@ -25,9 +25,23 @@ plot_particle_positions(fig, initial_positions[:, 1:4])
 fig.savefig(plots_directory / "initial_electron_positions.png")
 
 
+# Plot scattered electric field at the detector
+detector_positions = np.load("detector_positions.npy").T
+electric_field = np.load("electric_field.npy").T
+
+print("Plotting final state detected electric field")
+fig = plt.figure(figsize=(10, 6))
+fig.suptitle("Re-emitted radiation electric field")
+plt.plot(detector_positions[:, 0], np.linalg.vector_norm(electric_field, axis=-1))
+plt.xlabel("Detector $x$ coordinate")
+plt.ylabel("$E(x_0)$")
+plt.grid()
+fig.savefig(plots_directory / "electric_field.png")
+
+
 print("Maximum angular momentum:", final_angular_momenta.max())
 
-# # Plot final angular momenta distribution
+# Plot final angular momenta distribution
 fig = plt.figure(dpi=200)
 
 wavelength = lmbd

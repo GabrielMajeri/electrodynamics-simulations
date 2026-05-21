@@ -1,6 +1,7 @@
 module integrate
    use iso_fortran_env, only: dp => real64
-   use constants, only: c, charge_to_mass_ratio, num_particles, &
+   use constants, only: c, charge_to_mass_ratio, &
+      num_detector_points, num_particles, omega, pi, &
       integration_duration, integration_time_step, phi_0, tau_0
    use vector
    use beam, only: compute_laguerre_gauss_beam_electric_and_magnetic_field
@@ -9,12 +10,21 @@ module integrate
 
 contains
 
-   subroutine integrate_trajectories(initial_positions, initial_momenta, final_positions, final_momenta)
-      real(kind=dp), dimension(4, num_particles), intent(in) :: &
-         initial_positions(:, :), initial_momenta(:, :)
+   subroutine integrate_trajectories( &
+      initial_positions, initial_momenta, detector_positions, &
+      final_positions, final_momenta, electric_field &
+      )
+      real(kind=dp), intent(in) :: &
+         initial_positions(1:4, 1:num_particles), initial_momenta(1:4,  1:num_particles)
+
+      real(kind=dp), intent(in) :: &
+         detector_positions(1:3, 1:num_detector_points)
 
       real(kind=dp), dimension(4, num_particles), allocatable, intent(out) :: &
          final_positions(:, :), final_momenta(:, :)
+
+      complex(kind=dp), dimension(3, num_detector_points), allocatable, intent(out) :: &
+         electric_field(:, :)
 
       real(kind=dp), dimension(4, num_particles), allocatable :: positions(:, :), momenta(:, :)
 
@@ -23,13 +33,16 @@ contains
       integer :: particle_index, step
 
       integer(kind=selected_int_kind(18)) :: rate, start_time, end_time
-      real(kind=dp) :: duration
+
+      real(kind=dp) :: center_of_motion(1:3), current_time, duration
 
       allocate(positions(4, num_particles))
       allocate(momenta(4, num_particles))
 
       positions(:, :) = initial_positions
       momenta(:, :) = initial_momenta
+
+      allocate(electric_field(3, num_detector_points))
 
       write(*, '("Starting to integrate trajectories")')
 
@@ -38,10 +51,20 @@ contains
       call system_clock(start_time)
 
       !$omp parallel
-      !$omp do
+      !$omp do private(center_of_motion, current_time) reduction(+:electric_field)
       do particle_index = 1, num_particles
+         center_of_motion = initial_positions(2:4, particle_index)
+
+         ! Initialize a variable to track the current time
+         ! in the particle's local frame of reference
+         current_time = 0
+
          do step = 1, num_integration_steps
             call perform_integration_step(positions(1:4, particle_index), momenta(1:4, particle_index))
+
+            call compute_scattered_field(detector_positions, center_of_motion, current_time, positions(2:4, particle_index), momenta(2:4, particle_index), electric_field)
+
+            current_time = current_time + integration_time_step
          end do
       end do
       !$omp end parallel
@@ -55,6 +78,8 @@ contains
 
       final_positions = positions
       final_momenta = momenta
+
+      call normalize_field(electric_field)
 
    end subroutine integrate_trajectories
 
@@ -115,5 +140,64 @@ contains
       cutoff = exp(-t**2)
 
    end function cutoff
+
+   pure subroutine compute_scattered_field(detector_positions, center_of_motion, time, position, velocity, electric_field)
+      real(kind=dp), intent(in) :: detector_positions(1:3, 1:num_detector_points), &
+         center_of_motion(1:3), time, &
+         position(1:3), velocity(1:3)
+
+      complex(kind=dp), intent(out) :: electric_field(1:3, 1:num_detector_points)
+
+      complex(kind=dp) :: oscillatory_kernel_term(1:3), first_order_term(1:3)
+
+      integer :: detector_index
+      real(kind=dp) :: detector_position(1:3), particle_position(1:3), &
+         relative_detector_position(1:3), relative_particle_position(1:3), &
+         displacement(1:3), displacement_norm, &
+         relativistic_factor(1:3), view_direction(1:3)
+
+      do detector_index = 1, num_detector_points
+         detector_position = detector_positions(1:3, detector_index)
+         particle_position = position
+
+         ! x_0 = x - \symfrak{R}_0
+         relative_detector_position = detector_position - center_of_motion
+
+         ! r_0(t) = r(t) - \symfrak{R}_0
+         relative_particle_position = particle_position - center_of_motion
+
+         ! R(x_0, t) = x_0 - r_0(t)
+         displacement = relative_detector_position - relative_particle_position
+
+         ! |R(x_0, t)|
+         displacement_norm = norm2(displacement)
+
+         ! exp(i * omega * (t + |R(x_0, t)|/c))
+         oscillatory_kernel_term = exp(complex(0, 1) * omega * (time + displacement_norm / c))
+
+         ! beta = v / c
+         relativistic_factor = velocity / c
+
+         ! n = x_0 / |x_0|
+         view_direction = relative_detector_position / norm2(relative_detector_position)
+
+         ! (i * omega) / c * (beta(t) - n(x_0, t) * dot(n, beta)) / |R(x_0, t)|
+         first_order_term = (complex(0, 1) * omega / c) * (relativistic_factor - view_direction * dot_product(view_direction, relativistic_factor))
+
+         electric_field(:, detector_index) = electric_field(:, detector_index) + integration_time_step * oscillatory_kernel_term * first_order_term
+      end do
+
+   end subroutine compute_scattered_field
+
+   pure subroutine normalize_field(field)
+      complex(kind=dp), intent(inout) :: field(1:3, 1:num_detector_points)
+
+      integer :: detector_index
+
+      do detector_index = 1, num_detector_points
+         field(:, detector_index) = field(:, detector_index) / (8 * pi * pi)
+      end do
+
+   end subroutine normalize_field
 
 end module integrate
