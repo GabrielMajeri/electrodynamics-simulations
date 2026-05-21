@@ -10,8 +10,10 @@ from electrodynamics.typing import RealArray
 
 
 def initialize_detector_positions(large_circle_radius: float) -> RealArray:
+    num_detector_points: int = 512
+
     # Allocate a buffer for the detectors' positions
-    detector_positions = np.zeros(shape=(256, 3), dtype=np.float64)
+    detector_positions = np.zeros(shape=(num_detector_points, 3), dtype=np.float64)
 
     # Linearly displaced detector points
     detector_width = 50 * large_circle_radius
@@ -22,7 +24,7 @@ def initialize_detector_positions(large_circle_radius: float) -> RealArray:
     )
 
     # Radially displaced detector points
-    # phi = np.linspace(0, 2 * np.pi, 256)
+    # phi = np.linspace(0, 2 * np.pi, num_detector_points)
     # detector_positions[:, 0] = 3.8 * large_circle_radius * np.cos(phi)
     # detector_positions[:, 1] = 3.8 * large_circle_radius * np.sin(phi)
 
@@ -103,28 +105,55 @@ def main() -> None:
     detector_positions = initialize_detector_positions(large_circle_radius)
 
     if True:
+        print("Plotting experimental setup")
         plot_configuration(trajectories, detector_positions)
 
-    # TODO: timings
-
-    # Current offset of particle from "center" of its motion, aka r_0(t)
-    particle_displacements = trajectories - centers[:, np.newaxis, :]
+    # # Offset of detector point from "center" of particle motion, aka x_0(t)
+    # detector_displacements = (
+    #     detector_positions[:, np.newaxis, :] - centers[np.newaxis, :, :]
+    # )
 
     if True:
+        print("Plotting trajectory of a single particle")
+
+        # Current offset of particle from "center" of its motion, aka r_0(t)
+        particle_displacements = trajectories - centers[:, np.newaxis, :]
+
         plot_particle_trajectory(timestamps, particle_displacements, 0)
+
+    print("Computing relative trajectories/displacements (R_0(x_0, t))")
+    start_time = perf_counter()
 
     # Compute relative trajectories (with respect to each detector positions)
     # R(x_0, t) = x_0 - r_0(t) = (x - R_0) - (r(t) - R_0) = x - r(t)
     Rs = (
         detector_positions[:, np.newaxis, np.newaxis, :]
-        - particle_displacements[np.newaxis, :, :, :]
+        - trajectories[np.newaxis, :, :, :]
     )
 
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing relative displacements took {duration:.2f} seconds")
+
+    print("Computing displacement norms (|R_0(x_0, t)|)")
+    start_time = perf_counter()
+
     R_norms = np.linalg.vector_norm(Rs, axis=-1)
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing displacement norms took {duration:.4f} seconds")
+
+    print("Computing relative direction vectors (n(x_0, t))")
+    start_time = perf_counter()
 
     # Compute relative directions
     # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
     ns = Rs / np.expand_dims(R_norms, -1)
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing relative direction vectors took {duration:.4f} seconds")
 
     print()
     print("Checking for faster-than-light particles...")
@@ -143,11 +172,17 @@ def main() -> None:
     frequency = omega_laser
 
     print("Computing oscillatory kernel (complex exponential)")
+    start_time = perf_counter()
 
     # exp(i * omega * (t + R(x_0, t)/c))
     oscillatory_kernel = np.exp(1j * frequency * (timestamps + R_norms / c))
 
-    print("Computing first term of the integrand (1/|R|)")
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Evaluating oscillatory kernel took {duration:.4f} seconds")
+
+    print("Computing first-order term of the integrand (1/|R|)")
+    start_time = perf_counter()
 
     # ((i * omega)/c) * (beta(t) - n(x_0, t) * (dot(n, beta)))/|R(x_0, t)|
     integrand_first_term = (
@@ -159,12 +194,17 @@ def main() -> None:
         / np.expand_dims(R_norms, axis=-1)
     )
 
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing first-order term took {duration:.4f} seconds")
+
     # print("Computing second term of the integrand (1/|R|^2)")
 
     # # n(x_0, t)/|R(x_0, t)|^2
     # integrand_second_term = ns / np.expand_dims(np.square(R_norms), axis=-1)
 
     print("Summing up results (computing Riemann integral)")
+    start_time = perf_counter()
 
     dt = timestamps[1] - timestamps[0]
 
@@ -183,9 +223,20 @@ def main() -> None:
     #     axis=-2,
     # )
 
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing Riemann sums took {duration:.4f} seconds")
+
+    print("Summing up particles' contributions")
+    start_time = perf_counter()
+
     # Now sum up each particle's contribution
     first_term = np.sum(first_term, axis=-2)
     # second_term = np.sum(second_term, axis=-2)
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Summing up detector field contributions took {duration:.4f} seconds")
 
     final_time = perf_counter()
     total_duration = final_time - initial_time
