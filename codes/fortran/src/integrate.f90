@@ -145,7 +145,6 @@ contains
          do step = 1, num_integration_steps
             call perform_integration_step(positions(1:4, particle_index), momenta(1:4, particle_index))
 
-
             call compute_scattered_field( &
                detector_positions, initial_positions(2:4, particle_index), current_time, &
                positions(2:4, particle_index), momenta(2:4, particle_index), &

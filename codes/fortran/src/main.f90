@@ -35,12 +35,12 @@ program laguerre_gauss_beam_angular_momentum_transfer
    ! Save detector positions to disk
    call write_to_npy_file("detector_positions.npy", detector_positions)
 
-   ! Integrate trajectories for a fixed amount of time
-   call simulate_analytic_trajectories(initial_positions, initial_momenta, detector_positions, &
-      final_positions, final_momenta, electric_field)
+   ! call simulate_analytic_trajectories(initial_positions, initial_momenta, detector_positions, &
+   ! final_positions, final_momenta, electric_field)
 
-   !  call integrate_trajectories(initial_positions, initial_momenta, detector_positions, &
-   !     final_positions, final_momenta, electric_field)
+   ! Integrate trajectories for a fixed amount of time
+   call integrate_trajectories(initial_positions, initial_momenta, detector_positions, &
+      final_positions, final_momenta, electric_field)
 
    ! Save electric field at the detector to disk
    call write_to_npy_file("electric_field.npy", electric_field)
