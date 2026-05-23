@@ -17,8 +17,8 @@ class CircularTrajectories(NamedTuple):
 def simulate_circular_trajectories(
     # Radius of the large circle around which the particle's center are positioned.
     large_circle_radius,
-    # How many timestamps to use (will affect trajectory sampling frequency)
-    num_timestamps=4096,
+    # Integration time delta (will affect trajectory sampling frequency)
+    time_step=1,
 ) -> CircularTrajectories:
     """Code to numerically compute the particle's trajectories.
 
@@ -37,13 +37,19 @@ def simulate_circular_trajectories(
         )
     ).T
 
-    trajectories = np.empty((num_particles, num_timestamps, 3))
-
     # Determine for how long the simulation/numerical integration will run
     # We'll use an integer multiple of the laser pulse's period
     # TODO: turn into a configurable parameter
     num_periods = 40
     integration_duration = num_periods * (2 * np.pi) / omega_laser
+
+    print(
+        f"Simulating trajectories from t = {0.0} to t = {integration_duration}, time step = {time_step}"
+    )
+
+    num_timestamps = int(integration_duration / time_step) + 1
+    trajectories = np.empty((num_particles, num_timestamps, 3))
+
     timestamps = np.linspace(0, integration_duration, num_timestamps)
 
     # We apply a decay to the trajectories to ensure the integral decays near the boundaries

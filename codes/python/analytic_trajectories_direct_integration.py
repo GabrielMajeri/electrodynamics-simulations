@@ -87,6 +87,10 @@ def main() -> None:
     plots_dir = Path(__file__).parent / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
+    print(
+        f"Performing simulation with N = {num_particles} electrons, omega = {omega_laser}"
+    )
+
     initial_time = perf_counter()
 
     print("Computing electron trajectories")
@@ -160,6 +164,9 @@ def main() -> None:
 
     assert np.all(velocities <= c), "Particles are moving faster than light!"
 
+    print("No issues found")
+    print()
+
     relativistic_factor = velocities / c
 
     # Construct a cutoff
@@ -184,13 +191,10 @@ def main() -> None:
     print("Computing first-order term of the integrand (1/|R|)")
     start_time = perf_counter()
 
-    # ((i * omega)/c) * (beta(t) - n(x_0, t) * (dot(n, beta)))/|R(x_0, t)|
+    # ((i * omega)/c) * (beta(t) - n(x_0, t))/|R(x_0, t)|
     integrand_first_term = (
         ((1j * frequency) / c)
-        * (
-            relativistic_factor
-            - ns * np.expand_dims(np.linalg.vecdot(ns, relativistic_factor), axis=-1)
-        )
+        * (relativistic_factor - ns)
         / np.expand_dims(R_norms, axis=-1)
     )
 
@@ -198,10 +202,15 @@ def main() -> None:
     duration = end_time - start_time
     print(f"Computing first-order term took {duration:.4f} seconds")
 
-    # print("Computing second term of the integrand (1/|R|^2)")
+    print("Computing second-order term of the integrand (1/|R|^2)")
+    start_time = perf_counter()
 
-    # # n(x_0, t)/|R(x_0, t)|^2
-    # integrand_second_term = ns / np.expand_dims(np.square(R_norms), axis=-1)
+    # n(x_0, t)/|R(x_0, t)|^2
+    integrand_second_term = ns / np.expand_dims(np.square(R_norms), axis=-1)
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing second-order term took {duration:.4f} seconds")
 
     print("Summing up results (computing Riemann integral)")
     start_time = perf_counter()
@@ -216,12 +225,12 @@ def main() -> None:
         * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
         axis=-2,
     )
-    # TODO: compute second term using alternative formula
-    # second_term = dt * np.sum(
-    #     oscillatory_kernel * integrand_second_term,
-    #     # * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
-    #     axis=-2,
-    # )
+    second_term = dt * np.sum(
+        oscillatory_kernel
+        * integrand_second_term
+        * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
+        axis=-2,
+    )
 
     end_time = perf_counter()
     duration = end_time - start_time
@@ -232,7 +241,7 @@ def main() -> None:
 
     # Now sum up each particle's contribution
     first_term = np.sum(first_term, axis=-2)
-    # second_term = np.sum(second_term, axis=-2)
+    second_term = np.sum(second_term, axis=-2)
 
     end_time = perf_counter()
     duration = end_time - start_time
@@ -242,28 +251,28 @@ def main() -> None:
     total_duration = final_time - initial_time
     print(f"Execution took a total of {total_duration:.3g} seconds")
 
+    print()
     print("Plotting results")
 
-    # Plot terms' magnitude
-
+    # Plot magnitudes of integral terms
     first_term_norms = np.linalg.vector_norm(first_term, axis=-1)
-    # second_term_norms = np.linalg.vector_norm(second_term, axis=-1)
+    second_term_norms = np.linalg.vector_norm(second_term, axis=-1)
 
-    fig, ax = plt.subplots(1, 1)  # , figsize=(8, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(8, 5))
 
     plt.suptitle("Electric field spectral intensity $|E(x_0, \\omega)|$")
 
-    ax.set_title("First-order term ($1/|R|$)")
-    ax.plot(detector_positions[:, 0], first_term_norms)
-    ax.grid()
-    ax.set_xlabel("Detector position")
-    ax.set_ylabel("Electric vector field norm")
+    axes[0].set_title("First-order term ($1/|R|$)")
+    axes[0].plot(detector_positions[:, 0], first_term_norms)
+    axes[0].grid()
+    axes[0].set_xlabel("Detector position")
+    axes[0].set_ylabel("Electric vector field norm")
 
-    # axes[1].set_title("Second term ($1/|R|^2$)")
-    # axes[1].plot(second_term_norms, color="orange")
-    # axes[1].grid()
-    # axes[1].set_xlabel("Detector position")
-    # axes[1].set_ylabel("Electric vector field norm")
+    axes[1].set_title("Second-order term ($1/|R|^2$)")
+    axes[1].plot(detector_positions[:, 0], second_term_norms, color="orange")
+    axes[1].grid()
+    axes[1].set_xlabel("Detector position")
+    axes[1].set_ylabel("Electric vector field norm")
 
     plt.tight_layout()
     fig.savefig("plots/electric_field_magnitudes.pdf")
