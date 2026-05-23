@@ -16,9 +16,11 @@ add_executable(LaguerreGaussBeamAngularMomentumTransfer)
 target_sources(LaguerreGaussBeamAngularMomentumTransfer
     PRIVATE
         src/main.c++
+        src/initial_conditions.c++
         src/vector.c++
         src/beam.c++
         src/polarization.c++
+        src/trajectory.c++
         src/integrate.c++
         src/npy_io.c++
         src/angular_momentum.c++
@@ -63,6 +65,10 @@ target_compile_options(LaguerreGaussBeamAngularMomentumTransfer
         # Enable some optimizations for debug build
         $<$<CONFIG:Debug>:
             -O1
+        >
+        # Enable full optimizations for release build
+        $<$<CONFIG:Release>:
+            -O3
         >
         # Enable fast math for release build
         $<$<CONFIG:Release>:

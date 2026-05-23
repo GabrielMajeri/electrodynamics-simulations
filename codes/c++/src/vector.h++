@@ -40,12 +40,12 @@ struct Vector3D
 
     static inline Vector3D from_position(const Position &position)
     {
-        return Vector3D(position.x, position.y, position.z);
+        return {position.x, position.y, position.z};
     }
 
     static inline Vector3D from_momentum(const Momentum &momentum)
     {
-        return Vector3D(momentum.vx, momentum.vy, momentum.vz);
+        return {momentum.vx, momentum.vy, momentum.vz};
     }
 
     Real dot(const Vector3D &rhs) const noexcept;

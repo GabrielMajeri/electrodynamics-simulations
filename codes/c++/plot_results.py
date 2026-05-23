@@ -15,7 +15,7 @@ from electrodynamics.plotting import (
 plots_directory = Path("plots")
 plots_directory.mkdir(parents=True, exist_ok=True)
 
-initial_positions = np.load("initial_positions.npy")
+initial_positions = np.load("outputs/initial_positions.npy")
 
 print("Plotting initial electron positions")
 
@@ -25,7 +25,7 @@ plot_particle_positions(fig, initial_positions[:, 1:4])
 fig.savefig(plots_directory / "initial_electron_positions.png")
 
 
-particle_trajectory = np.load("particle_trajectory.npy")
+particle_trajectory = np.load("outputs/particle_trajectory.npy")
 
 print("Plotting sample electron trajectory")
 
@@ -45,8 +45,8 @@ fig.tight_layout()
 fig.savefig(plots_directory / "electron_trajectory.png")
 
 
-detector_positions = np.load("detector_positions.npy")
-electric_field = np.load("electric_field.npy")
+detector_positions = np.load("outputs/detector_positions.npy")
+electric_field = np.load("outputs/electric_field.npy")
 
 print("Plotting final state detected electric field")
 fig = plt.figure(figsize=(10, 6))
@@ -58,7 +58,7 @@ plt.grid()
 fig.savefig(plots_directory / "electric_field.png")
 
 
-final_angular_momenta = np.load("angular_momenta.npy")
+final_angular_momenta = np.load("outputs/angular_momenta.npy")
 
 print("Maximum angular momentum:", final_angular_momenta.max())
 

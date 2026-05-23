@@ -1,23 +1,28 @@
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 
 #include "angular_momentum.h++"
 #include "common.h++"
 #include "constants.h++"
 #include "initial_conditions.h++"
-#include "integrate.h++"
 #include "npy_io.h++"
+#include "trajectory.h++"
 #include "types.h++"
 
 int main()
 {
     std::cout << "Starting Laguerre-Gauss beam angular momentum transfer simulation code" << std::endl;
 
+    std::filesystem::create_directory("outputs");
+
 #ifdef _OPENMP
-    std::cout << "Using OpenMP with up to " << omp_get_num_procs() << " cores" << std::endl;
+    std::cout
+        << "Using OpenMP with up to " << omp_get_num_procs() << " cores" << std::endl;
 #else
 #ifdef _OPENACC
-    std::cout << "Using OpenACC\n";
+    std::cout
+        << "Using OpenACC\n";
 
     const auto device_type = acc_get_device_type();
     std::cout << "OpenACC device type: ";
@@ -36,17 +41,19 @@ int main()
     std::cout << std::endl;
 
 #else
-    std::cout << "Warning: not using any sort of accelerator or parallelization" << std::endl;
+    std::cout
+        << "Warning: not using any sort of accelerator or parallelization" << std::endl;
 #endif
 #endif
 
-    constexpr uint32_t seed = 42;
+    // constexpr uint32_t seed = 42;
 
     std::cout << "Generating initial positions for " << num_electrons << " electrons, uniformly distributed within a disk of radius " << disk_radius << " in the x-y plane, centered at the origin" << std::endl;
 
     auto start = std::chrono::steady_clock::now();
 
-    const auto initial_electron_positions = generate_initial_electron_positions(num_electrons, disk_radius, seed);
+    const std::vector<Position> initial_electron_positions = generate_initial_electron_positions_on_circle(num_electrons, disk_radius);
+    // const std::vector<Position> initial_electron_positions = generate_initial_electron_positions_within_disk(num_electrons, disk_radius, seed);
 
     auto finish = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed_seconds = finish - start;
@@ -54,7 +61,7 @@ int main()
     std::cout << "Generated " << num_electrons << " initial positions in " << elapsed_seconds.count() << " seconds" << std::endl;
 
     std::cout << "Writing initial electron positions to disk..." << std::endl;
-    write_npy_file("initial_positions.npy", initial_electron_positions);
+    write_npy_file("outputs/initial_positions.npy", initial_electron_positions);
 
     const auto initial_electron_momenta = generate_initial_electron_momenta(num_electrons);
 
@@ -64,8 +71,8 @@ int main()
 
     start = std::chrono::steady_clock::now();
 
-    const auto integration_result =
-        use_analytic_trajectories ? analytic_trajectories(initial_electron_positions) : integrate_trajectories(initial_electron_positions, initial_electron_momenta);
+    const auto integration_result = analytic_trajectories(initial_electron_positions);
+    // const auto integration_result = integrate_trajectories(initial_electron_positions, initial_electron_momenta);
 
     finish = std::chrono::steady_clock::now();
     elapsed_seconds = finish - start;
@@ -78,12 +85,12 @@ int main()
 #endif
 
     std::cout << "Writing sample particle trajectory to disk..." << std::endl;
-    write_npy_file("particle_trajectory.npy", integration_result.particle_trajectory);
+    write_npy_file("outputs/particle_trajectory.npy", integration_result.particle_trajectory);
 
     std::cout << "Writing emitted electric and magnetic fields to disk..." << std::endl;
-    write_npy_file("detector_positions.npy", integration_result.detector_positions);
-    write_npy_file("electric_field.npy", integration_result.electric_field);
-    write_npy_file("magnetic_field.npy", integration_result.magnetic_field);
+    write_npy_file("outputs/detector_positions.npy", integration_result.detector_positions);
+    write_npy_file("outputs/electric_field.npy", integration_result.electric_field);
+    write_npy_file("outputs/magnetic_field.npy", integration_result.magnetic_field);
 
     std::cout << "Computing angular momentum in the z direction for electrons in the final state" << std::endl;
 
@@ -98,7 +105,7 @@ int main()
     std::cout << "Computing angular momenta for " << num_electrons << " electrons took " << elapsed_seconds.count() << " seconds" << std::endl;
 
     std::cout << "Writing angular momenta to disk..." << std::endl;
-    write_npy_file("angular_momenta.npy", angular_momenta);
+    write_npy_file("outputs/angular_momenta.npy", angular_momenta);
 
     std::cout << "Done" << std::endl;
 
