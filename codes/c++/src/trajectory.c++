@@ -27,7 +27,8 @@ static void compute_scattered_field(
     const Position &position, const Momentum &momentum,
     const Position &initial_position,
     const std::vector<Vector3D> &detector_positions,
-    std::vector<ComplexVector3D> &electric_field)
+    std::vector<ComplexVector3D> &electric_field,
+    std::vector<ComplexVector3D> &magnetic_field)
 {
     // \symfrak{R}_0 (for this particle)
     const auto initial_position_vector = Vector3D::from_position(initial_position);
@@ -56,16 +57,27 @@ static void compute_scattered_field(
         // v/c
         const auto beta = particle_velocity / c;
 
-        // O(1/|R|) term
+        // Electric field O(1/|R|) term
         // ((i * omega) / c) * (beta(t) - n(x_0, t)) / |R(x_0, t)|
-        const auto first_term = ((1i * omega) / c) * ComplexVector3D::from((beta - view_direction) / displacement_norm);
+        const auto electric_field_first_term = ((1i * omega) / c) * ComplexVector3D::from((beta - view_direction) / displacement_norm);
 
-        // O(1/|R|^2) term
+        const auto displacement_norm_squared = displacement_norm * displacement_norm;
+
+        // Electric field O(1/|R|^2) term
         // n(x_0, t) / |R(x_0, t)|^2
-        const auto second_term = ComplexVector3D::from(view_direction / (displacement_norm * displacement_norm));
+        const auto electric_field_second_term = ComplexVector3D::from(view_direction / displacement_norm_squared);
+
+        const auto n_cross_beta = view_direction.cross(beta);
+
+        // Magnetic field O(1/|R|) term
+        const auto magnetic_field_first_term = ((1i * omega) / c) * ComplexVector3D::from(n_cross_beta / displacement_norm);
+
+        // Magnetic field O(1/|R|^2) term
+        const auto magnetic_field_second_term = ComplexVector3D::from(n_cross_beta / displacement_norm_squared);
 
         // Riemann summation
-        electric_field[detector_index] += integration_time_step * oscillatory_kernel * (first_term + second_term);
+        electric_field[detector_index] += integration_time_step * oscillatory_kernel * (electric_field_first_term + electric_field_second_term);
+        magnetic_field[detector_index] += integration_time_step * oscillatory_kernel * (magnetic_field_first_term - magnetic_field_second_term);
     }
 }
 
@@ -129,7 +141,10 @@ IntegrationResult analytic_trajectories(std::vector<Position> initial_positions)
                 0,
             };
 
-            compute_scattered_field(current_time, new_position, new_momentum, initial_position, detector_positions, electric_field);
+            compute_scattered_field(
+                current_time, new_position, new_momentum,
+                initial_position, detector_positions,
+                electric_field, magnetic_field);
 
             if (particle_index == 0)
             {
@@ -190,7 +205,10 @@ IntegrationResult integrate_trajectories(
 
             const auto [new_position, new_momentum] = perform_integration_step(previous_position, previous_momentum);
 
-            compute_scattered_field(current_time, new_position, new_momentum, initial_positions[particle_index], detector_positions, electric_field);
+            compute_scattered_field(
+                current_time, new_position, new_momentum,
+                initial_positions[particle_index], detector_positions,
+                electric_field, magnetic_field);
 
             if (particle_index == 0)
             {

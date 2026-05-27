@@ -51,6 +51,8 @@ struct Vector3D
     Real dot(const Vector3D &rhs) const noexcept;
     Real norm() const noexcept;
     Vector3D normalized() const;
+
+    Vector3D cross(const Vector3D &rhs) const noexcept;
 };
 
 OPENACC_ROUTINE
@@ -79,6 +81,9 @@ struct ComplexVector3D
 
 OPENACC_ROUTINE
 ComplexVector3D operator+(ComplexVector3D v, ComplexVector3D w);
+
+OPENACC_ROUTINE
+ComplexVector3D operator-(ComplexVector3D v, ComplexVector3D w);
 
 OPENACC_ROUTINE
 ComplexVector3D operator*(Complex scalar, ComplexVector3D v);

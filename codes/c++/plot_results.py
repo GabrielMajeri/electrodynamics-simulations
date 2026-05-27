@@ -47,6 +47,7 @@ fig.savefig(plots_directory / "electron_trajectory.png")
 
 detector_positions = np.load("outputs/detector_positions.npy")
 electric_field = np.load("outputs/electric_field.npy")
+magnetic_field = np.load("outputs/magnetic_field.npy")
 
 print("Plotting final state detected electric field")
 fig = plt.figure(figsize=(10, 6))
@@ -57,6 +58,22 @@ plt.ylabel("$E(x_0)$")
 plt.grid()
 fig.savefig(plots_directory / "electric_field.png")
 
+
+print("Plotting final state detected magnetic field")
+fig = plt.figure(figsize=(10, 6))
+fig.suptitle("Re-emitted radiation magnetic field")
+# plt.plot(detector_positions[:, 0], np.linalg.vector_norm(electric_field, axis=-1))
+plt.plot(detector_positions[:, 0], np.real(magnetic_field[:, 0]), label="Re B_x")
+plt.plot(detector_positions[:, 0], np.imag(magnetic_field[:, 0]), label="Im B_x")
+plt.plot(detector_positions[:, 0], np.real(magnetic_field[:, 1]), label="Re B_y")
+plt.plot(detector_positions[:, 0], np.imag(magnetic_field[:, 1]), label="Im B_y")
+plt.plot(detector_positions[:, 0], np.real(magnetic_field[:, 2]), label="Re B_z")
+plt.plot(detector_positions[:, 0], np.imag(magnetic_field[:, 2]), label="Im B_z")
+plt.legend()
+plt.xlabel("Detector $x$ coordinate")
+plt.ylabel("$|B(x_0)|$")
+plt.grid()
+fig.savefig(plots_directory / "magnetic_field.png")
 
 final_angular_momenta = np.load("outputs/angular_momenta.npy")
 
