@@ -15,7 +15,7 @@ constexpr Real c = 137.036;
 #pragma acc declare copyin(c)
 #endif
 
-// constexpr size_t num_electrons = 30;
+// constexpr size_t num_electrons = 2;
 constexpr size_t num_electrons = 4 * 1024;
 // constexpr size_t num_electrons = 16 * 1024;
 // constexpr std::size_t num_electrons = 64 * 1024;
@@ -27,7 +27,7 @@ constexpr Real lambda = 2 * pi * c / omega;
 constexpr Real wavelength = lambda;
 constexpr Real waist_radius = 75 * lambda;
 
-constexpr Real large_circle_radius = 50 * lambda;
+constexpr Real large_circle_radius = 75 * lambda;
 
 // TODO: fix convergence issues for larger values of a_0
 constexpr Real a_0 = 1e-2;
@@ -60,5 +60,8 @@ constexpr std::size_t num_steps = integration_duration / integration_time_step;
 
 constexpr std::size_t detector_grid_size_x = 256;
 constexpr std::size_t num_detector_points = detector_grid_size_x;
-constexpr Real detector_width = 2500 * lambda;
-constexpr Real detector_height = 2500 * lambda;
+constexpr Real detector_width = 20 * 75 * lambda;
+constexpr Real detector_height = 20 * 75 * lambda;
+
+// Needs to be far away
+constexpr auto detector_z = 2 * 100'000 * lambda;

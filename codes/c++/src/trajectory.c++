@@ -11,7 +11,6 @@ using namespace std::complex_literals;
 static std::vector<Vector3D> initialize_detector_positions()
 {
     std::vector<Vector3D> detector_positions(num_detector_points);
-    constexpr auto detector_z = 1000 * lambda;
 
     for (std::size_t index = 0; index < detector_grid_size_x; ++index)
     {
