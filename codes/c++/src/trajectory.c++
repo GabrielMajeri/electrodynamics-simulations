@@ -16,6 +16,10 @@ static std::vector<Vector3D> initialize_detector_positions()
     {
         const auto x = -detector_width + index * (2 * detector_width) / detector_grid_size_x;
         detector_positions[index] = {x, 0, detector_z};
+
+        // const auto x = detector_width / 2.0 * std::cos(2 * pi * index / detector_grid_size_x);
+        // const auto y = detector_width / 2.0 * std::sin(2 * pi * index / detector_grid_size_x);
+        // detector_positions[index] = {x, y, detector_z};
     }
 
     return detector_positions;
@@ -56,22 +60,27 @@ static void compute_scattered_field(
         // v/c
         const auto beta = particle_velocity / c;
 
-        // Electric field O(1/|R|) term
-        // ((i * omega) / c) * (beta(t) - n(x_0, t)) / |R(x_0, t)|
-        const auto electric_field_first_term = ((1i * omega) / c) * ComplexVector3D::from((beta - view_direction) / displacement_norm);
+        //===== Electric field terms =====
+        // Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))
+        const auto electric_field_common_term = view_direction.cross(view_direction.cross(beta));
+
+        // O(1/|R|) term
+        // - ((i * omega) / c) * (common term) / |R(x_0, t)|
+        const auto electric_field_first_term = -((1i * omega) / c) * ComplexVector3D::from(electric_field_common_term / displacement_norm);
 
         const auto displacement_norm_squared = displacement_norm * displacement_norm;
 
-        // Electric field O(1/|R|^2) term
-        // n(x_0, t) / |R(x_0, t)|^2
-        const auto electric_field_second_term = ComplexVector3D::from(view_direction / displacement_norm_squared);
+        // O(1/|R|^2) term
+        // [(common term) + n(x_0, t) * (1 + dot(n(x_0, t), \beta(t)))] / |R(x_0, t)|^2
+        const auto electric_field_second_term = ComplexVector3D::from((electric_field_common_term + view_direction * (1 + view_direction.dot(beta))) / displacement_norm_squared);
 
         const auto n_cross_beta = view_direction.cross(beta);
 
-        // Magnetic field O(1/|R|) term
+        //===== Magnetic field terms =====
+        // O(1/|R|) term
         const auto magnetic_field_first_term = ((1i * omega) / c) * ComplexVector3D::from(n_cross_beta / displacement_norm);
 
-        // Magnetic field O(1/|R|^2) term
+        // O(1/|R|^2) term
         const auto magnetic_field_second_term = ComplexVector3D::from(n_cross_beta / displacement_norm_squared);
 
         // Riemann summation

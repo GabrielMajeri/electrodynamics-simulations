@@ -48,6 +48,11 @@ Vector3D Vector3D::cross(const Vector3D &rhs) const noexcept
     };
 }
 
+Vector3D operator+(Vector3D v, Vector3D w)
+{
+    return {v.x + w.x, v.y + w.y, v.z + w.z};
+}
+
 Vector3D operator-(Vector3D v, Vector3D w)
 {
     return {v.x - w.x, v.y - w.y, v.z - w.z};
@@ -90,4 +95,9 @@ ComplexVector3D operator-(ComplexVector3D v, ComplexVector3D w)
 ComplexVector3D operator*(Complex scalar, ComplexVector3D v)
 {
     return {scalar * v.x, scalar * v.y, scalar * v.z};
+}
+
+ComplexVector3D operator/(ComplexVector3D v, Complex scalar)
+{
+    return {v.x / scalar, v.y / scalar, v.z / scalar};
 }

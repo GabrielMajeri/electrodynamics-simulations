@@ -16,6 +16,7 @@ constexpr Real c = 137.036;
 #endif
 
 // constexpr size_t num_electrons = 2;
+// constexpr size_t num_electrons = 1 * 1024;
 constexpr size_t num_electrons = 4 * 1024;
 // constexpr size_t num_electrons = 16 * 1024;
 // constexpr std::size_t num_electrons = 64 * 1024;
@@ -53,7 +54,7 @@ constexpr auto phi_0 = 3 * tau_0;
 
 constexpr Real integration_start_time = 0.0, integration_end_time = 6 * tau_0;
 // constexpr Real integration_start_time = 0.0, integration_end_time = 40 * (2 * pi) / omega;
-constexpr Real integration_time_step = 1e-1;
+constexpr Real integration_time_step = 1;
 
 constexpr Real integration_duration = integration_end_time - integration_start_time;
 constexpr std::size_t num_steps = integration_duration / integration_time_step;

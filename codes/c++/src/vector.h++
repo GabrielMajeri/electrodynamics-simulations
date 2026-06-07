@@ -56,6 +56,9 @@ struct Vector3D
 };
 
 OPENACC_ROUTINE
+Vector3D operator+(Vector3D v, Vector3D w);
+
+OPENACC_ROUTINE
 Vector3D operator-(Vector3D v, Vector3D w);
 
 OPENACC_ROUTINE
@@ -87,3 +90,6 @@ ComplexVector3D operator-(ComplexVector3D v, ComplexVector3D w);
 
 OPENACC_ROUTINE
 ComplexVector3D operator*(Complex scalar, ComplexVector3D v);
+
+OPENACC_ROUTINE
+ComplexVector3D operator/(ComplexVector3D v, Complex scalar);

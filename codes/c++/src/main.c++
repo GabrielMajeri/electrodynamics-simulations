@@ -46,14 +46,14 @@ int main()
 #endif
 #endif
 
-    // constexpr uint32_t seed = 42;
+    constexpr uint32_t seed = 42;
 
     std::cout << "Generating initial positions for " << num_electrons << " electrons, uniformly distributed within a disk of radius " << disk_radius << " in the x-y plane, centered at the origin" << std::endl;
 
     auto start = std::chrono::steady_clock::now();
 
-    const std::vector<Position> initial_electron_positions = generate_initial_electron_positions_on_circle(num_electrons, disk_radius);
-    // const std::vector<Position> initial_electron_positions = generate_initial_electron_positions_within_disk(num_electrons, disk_radius, seed);
+    // const std::vector<Position> initial_electron_positions = generate_initial_electron_positions_on_circle(num_electrons, disk_radius);
+    const std::vector<Position> initial_electron_positions = generate_initial_electron_positions_within_disk(num_electrons, disk_radius, seed);
 
     auto finish = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed_seconds = finish - start;
@@ -71,8 +71,8 @@ int main()
 
     start = std::chrono::steady_clock::now();
 
-    const auto integration_result = analytic_trajectories(initial_electron_positions);
-    // const auto integration_result = integrate_trajectories(initial_electron_positions, initial_electron_momenta);
+    // const auto integration_result = analytic_trajectories(initial_electron_positions);
+    const auto integration_result = integrate_trajectories(initial_electron_positions, initial_electron_momenta);
 
     finish = std::chrono::steady_clock::now();
     elapsed_seconds = finish - start;
