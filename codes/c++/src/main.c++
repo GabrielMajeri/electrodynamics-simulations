@@ -7,6 +7,7 @@
 #include "constants.h++"
 #include "initial_conditions.h++"
 #include "npy_io.h++"
+#include "detector.h++"
 #include "trajectory.h++"
 #include "types.h++"
 
@@ -65,14 +66,20 @@ int main()
 
     const auto initial_electron_momenta = generate_initial_electron_momenta(num_electrons);
 
+    std::cout << "Generating detector positions" << std::endl;
+    const auto detector_positions = initialize_detector_positions();
+
+    std::cout << "Saving detector positions to disk..." << std::endl;
+    write_npy_file("outputs/detector_positions.npy", detector_positions);
+
     std::cout << "Integrating equations of motions from t_0 = " << integration_start_time
               << " up to t_final = " << integration_end_time
               << ", with a time step of " << integration_time_step << std::endl;
 
     start = std::chrono::steady_clock::now();
 
-    // const auto integration_result = analytic_trajectories(initial_electron_positions);
-    const auto integration_result = integrate_trajectories(initial_electron_positions, initial_electron_momenta);
+    // const auto integration_result = analytic_trajectories(initial_electron_positions, detector_positions);
+    const auto integration_result = integrate_trajectories(initial_electron_positions, initial_electron_momenta, detector_positions);
 
     finish = std::chrono::steady_clock::now();
     elapsed_seconds = finish - start;
@@ -88,7 +95,6 @@ int main()
     write_npy_file("outputs/particle_trajectory.npy", integration_result.particle_trajectory);
 
     std::cout << "Writing emitted electric and magnetic fields to disk..." << std::endl;
-    write_npy_file("outputs/detector_positions.npy", integration_result.detector_positions);
     write_npy_file("outputs/electric_field.npy", integration_result.electric_field);
     write_npy_file("outputs/magnetic_field.npy", integration_result.magnetic_field);
 

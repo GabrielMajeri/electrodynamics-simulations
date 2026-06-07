@@ -24,6 +24,7 @@ target_sources(LaguerreGaussBeamAngularMomentumTransfer
         src/integrate.c++
         src/npy_io.c++
         src/angular_momentum.c++
+        src/detector.c++
 )
 
 # Use a modern C++ standard

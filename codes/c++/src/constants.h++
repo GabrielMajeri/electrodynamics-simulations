@@ -59,8 +59,8 @@ constexpr Real integration_time_step = 1;
 constexpr Real integration_duration = integration_end_time - integration_start_time;
 constexpr std::size_t num_steps = integration_duration / integration_time_step;
 
-constexpr std::size_t detector_grid_size_x = 256;
-constexpr std::size_t num_detector_points = detector_grid_size_x;
+constexpr std::size_t detector_grid_size_x = 64;
+constexpr std::size_t detector_grid_size_y = 64;
 constexpr Real detector_width = 20 * 75 * lambda;
 constexpr Real detector_height = 20 * 75 * lambda;
 

@@ -58,3 +58,68 @@ Acceleration compute_acceleration(Momentum previous_momentum, Vector3D electric_
     const Acceleration acceleration_direction{agamma, ax, ay, az};
     return charge_to_mass_ratio * acceleration_direction;
 }
+
+void integrate_scattered_field(
+    Real current_time,
+    const Position &position, const Momentum &momentum,
+    const Position &initial_position,
+    const std::vector<Vector3D> &detector_positions,
+    std::vector<ComplexVector3D> &electric_field,
+    std::vector<ComplexVector3D> &magnetic_field)
+{
+    // \symfrak{R}_0 (for this particle)
+    const auto initial_position_vector = Vector3D::from_position(initial_position);
+
+    const auto num_detector_points = detector_positions.size();
+    for (std::size_t detector_index = 0; detector_index < num_detector_points; ++detector_index)
+    {
+        const auto particle_position = Vector3D::from_position(position);
+        const auto particle_velocity = Vector3D::from_momentum(momentum);
+
+        // r_0(t) = r(t) - R_0
+        const auto particle_displacement = particle_position - initial_position_vector;
+
+        // x_0(t) = x - R_0
+        const auto detector_displacement = detector_positions[detector_index] - initial_position_vector;
+
+        // R(x_0, t) = x_0 - r_0(t) = (x - R_0) - (r(t) - R_0) = x - r(t)
+        const auto displacement = detector_displacement - particle_displacement;
+        const auto displacement_norm = displacement.norm();
+
+        // n(x_0, t) = R(x_0, t)/|R(x_0, t)|
+        const auto view_direction = displacement / displacement_norm;
+
+        // exp(i * omega * (t + R(x_0, t)/c))
+        const auto oscillatory_kernel = std::exp(1i * omega * (current_time + displacement_norm / c));
+
+        // v/c
+        const auto beta = particle_velocity / c;
+
+        //===== Electric field terms =====
+        // Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))
+        const auto electric_field_common_term = view_direction.cross(view_direction.cross(beta));
+
+        // O(1/|R|) term
+        // - ((i * omega) / c) * (common term) / |R(x_0, t)|
+        const auto electric_field_first_term = -((1i * omega) / c) * ComplexVector3D::from(electric_field_common_term / displacement_norm);
+
+        const auto displacement_norm_squared = displacement_norm * displacement_norm;
+
+        // O(1/|R|^2) term
+        // [(common term) + n(x_0, t) * (1 + dot(n(x_0, t), \beta(t)))] / |R(x_0, t)|^2
+        const auto electric_field_second_term = ComplexVector3D::from((electric_field_common_term + view_direction * (1 + view_direction.dot(beta))) / displacement_norm_squared);
+
+        const auto n_cross_beta = view_direction.cross(beta);
+
+        //===== Magnetic field terms =====
+        // O(1/|R|) term
+        const auto magnetic_field_first_term = ((1i * omega) / c) * ComplexVector3D::from(n_cross_beta / displacement_norm);
+
+        // O(1/|R|^2) term
+        const auto magnetic_field_second_term = ComplexVector3D::from(n_cross_beta / displacement_norm_squared);
+
+        // Riemann summation
+        electric_field[detector_index] += integration_time_step * oscillatory_kernel * (electric_field_first_term + electric_field_second_term);
+        magnetic_field[detector_index] += integration_time_step * oscillatory_kernel * (magnetic_field_first_term - magnetic_field_second_term);
+    }
+}
