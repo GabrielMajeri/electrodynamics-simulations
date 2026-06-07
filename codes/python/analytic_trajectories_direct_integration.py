@@ -29,7 +29,7 @@ def initialize_detector_positions(large_circle_radius: float) -> RealArray:
     # detector_positions[:, 1] = 3.8 * large_circle_radius * np.sin(phi)
 
     # Offset it to be very high in the Z direction
-    detector_positions[:, 2] = 1000 * lmbd
+    detector_positions[:, 2] = 2 * 100_000 * lmbd
 
     return detector_positions
 
@@ -188,11 +188,11 @@ def main() -> None:
     duration = end_time - start_time
     print(f"Evaluating oscillatory kernel took {duration:.4f} seconds")
 
-    print("Computing first-order term of the integrand (1/|R|)")
+    print("Computing first-order term of the electric field integral (1/|R|)")
     start_time = perf_counter()
 
     # ((i * omega)/c) * (beta(t) - n(x_0, t))/|R(x_0, t)|
-    integrand_first_term = (
+    electric_field_integrand_first_term = (
         ((1j * frequency) / c)
         * (relativistic_factor - ns)
         / np.expand_dims(R_norms, axis=-1)
@@ -200,17 +200,62 @@ def main() -> None:
 
     end_time = perf_counter()
     duration = end_time - start_time
-    print(f"Computing first-order term took {duration:.4f} seconds")
+    print(
+        f"Computing electric field first-order integrand term took {duration:.4f} seconds"
+    )
 
-    print("Computing second-order term of the integrand (1/|R|^2)")
+    print("Computing second-order term of the electric field integral (1/|R|^2)")
     start_time = perf_counter()
 
     # n(x_0, t)/|R(x_0, t)|^2
-    integrand_second_term = ns / np.expand_dims(np.square(R_norms), axis=-1)
+    electric_field_integrand_second_term = ns / np.expand_dims(
+        np.square(R_norms), axis=-1
+    )
 
     end_time = perf_counter()
     duration = end_time - start_time
-    print(f"Computing second-order term took {duration:.4f} seconds")
+    print(
+        f"Computing electric field second-order integrand term took {duration:.4f} seconds"
+    )
+
+    print("Computing term in the magnetic field integrand (n cross beta)")
+    start_time = perf_counter()
+
+    ns_cross_relativistc_factor = np.cross(ns, relativistic_factor)
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(f"Computing magnetic field integrand common term took {duration:.4f} seconds")
+
+    print("Computing first-order term of the magnetic field integral (1/|R|)")
+    start_time = perf_counter()
+
+    # ((i * omega)/c) * (n(x_0, t) \times beta(t)) / |R(x_0, t)|
+    magnetic_field_integrand_first_term = (
+        ((1j * frequency) / c)
+        * ns_cross_relativistc_factor
+        / np.expand_dims(R_norms, axis=-1)
+    )
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(
+        f"Computing magnetic field first-order integrand term took {duration:.4f} seconds"
+    )
+
+    print("Computing second-order term of the magnetic field integral (1/|R|^2)")
+    start_time = perf_counter()
+
+    # - (n(x_0, t) \times beta(t))/|R(x_0, t)|^2
+    magnetic_field_integrand_second_term = (
+        -ns_cross_relativistc_factor / np.expand_dims(np.square(R_norms), axis=-1)
+    )
+
+    end_time = perf_counter()
+    duration = end_time - start_time
+    print(
+        f"Computing electric field second-order integrand term took {duration:.4f} seconds"
+    )
 
     print("Summing up results (computing Riemann integral)")
     start_time = perf_counter()
@@ -219,15 +264,28 @@ def main() -> None:
 
     # First, sum up along time dimension, to compute integral
     oscillatory_kernel = np.expand_dims(oscillatory_kernel, axis=-1)
-    first_term = dt * np.sum(
+    electric_field_first_term = dt * np.sum(
         oscillatory_kernel
-        * integrand_first_term
+        * electric_field_integrand_first_term
         * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
         axis=-2,
     )
-    second_term = dt * np.sum(
+    electric_field_second_term = dt * np.sum(
         oscillatory_kernel
-        * integrand_second_term
+        * electric_field_integrand_second_term
+        * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
+        axis=-2,
+    )
+
+    magnetic_field_first_term = dt * np.sum(
+        oscillatory_kernel
+        * magnetic_field_integrand_first_term
+        * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
+        axis=-2,
+    )
+    magnetic_field_second_term = dt * np.sum(
+        oscillatory_kernel
+        * magnetic_field_integrand_second_term
         * cutoff[np.newaxis, np.newaxis, :, np.newaxis],
         axis=-2,
     )
@@ -240,8 +298,10 @@ def main() -> None:
     start_time = perf_counter()
 
     # Now sum up each particle's contribution
-    first_term = np.sum(first_term, axis=-2)
-    second_term = np.sum(second_term, axis=-2)
+    electric_field_first_term = np.sum(electric_field_first_term, axis=-2)
+    electric_field_second_term = np.sum(electric_field_second_term, axis=-2)
+    magnetic_field_first_term = np.sum(magnetic_field_first_term, axis=-2)
+    magnetic_field_second_term = np.sum(magnetic_field_second_term, axis=-2)
 
     end_time = perf_counter()
     duration = end_time - start_time
@@ -254,28 +314,68 @@ def main() -> None:
     print()
     print("Plotting results")
 
+    print("Plotting electric field")
+
     # Plot magnitudes of integral terms
-    first_term_norms = np.linalg.vector_norm(first_term, axis=-1)
-    second_term_norms = np.linalg.vector_norm(second_term, axis=-1)
+    electric_field_first_term_norms = np.linalg.vector_norm(
+        electric_field_first_term, axis=-1
+    )
+    electric_field_second_term_norms = np.linalg.vector_norm(
+        electric_field_second_term, axis=-1
+    )
 
     fig, axes = plt.subplots(1, 2, figsize=(8, 5))
 
     plt.suptitle("Electric field spectral intensity $|E(x_0, \\omega)|$")
 
     axes[0].set_title("First-order term ($1/|R|$)")
-    axes[0].plot(detector_positions[:, 0], first_term_norms)
+    axes[0].plot(detector_positions[:, 0], electric_field_first_term_norms)
     axes[0].grid()
     axes[0].set_xlabel("Detector position")
     axes[0].set_ylabel("Electric vector field norm")
 
     axes[1].set_title("Second-order term ($1/|R|^2$)")
-    axes[1].plot(detector_positions[:, 0], second_term_norms, color="orange")
+    axes[1].plot(
+        detector_positions[:, 0], electric_field_second_term_norms, color="orange"
+    )
     axes[1].grid()
     axes[1].set_xlabel("Detector position")
     axes[1].set_ylabel("Electric vector field norm")
 
     plt.tight_layout()
     fig.savefig("plots/electric_field_magnitudes.pdf")
+    plt.close()
+
+    print("Plotting magnetic field")
+
+    # Plot magnitudes of integral terms
+    magnetic_field_first_term_norms = np.linalg.vector_norm(
+        magnetic_field_first_term, axis=-1
+    )
+    magnetic_field_second_term_norms = np.linalg.vector_norm(
+        magnetic_field_second_term, axis=-1
+    )
+
+    fig, axes = plt.subplots(1, 2, figsize=(8, 5))
+
+    plt.suptitle("Magnetic field spectral intensity $|B(x_0, \\omega)|$")
+
+    axes[0].set_title("First-order term ($1/|R|$)")
+    axes[0].plot(detector_positions[:, 0], magnetic_field_first_term_norms)
+    axes[0].grid()
+    axes[0].set_xlabel("Detector position")
+    axes[0].set_ylabel("Electric vector field norm")
+
+    axes[1].set_title("Second-order term ($1/|R|^2$)")
+    axes[1].plot(
+        detector_positions[:, 0], magnetic_field_second_term_norms, color="orange"
+    )
+    axes[1].grid()
+    axes[1].set_xlabel("Detector position")
+    axes[1].set_ylabel("Magnetic vector field norm")
+
+    plt.tight_layout()
+    fig.savefig("plots/magnetic_field_magnitudes.pdf")
     plt.close()
 
 
