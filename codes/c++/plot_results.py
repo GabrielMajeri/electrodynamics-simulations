@@ -5,7 +5,8 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from electrodynamics.constants import lmbd
+from electrodynamics.angular_momentum import compute_angular_momentum_derivative
+from electrodynamics.constants import lmbd, omega_laser
 from electrodynamics.plotting import (
     plot_angular_momentum_distribution,
     plot_particle_positions,
@@ -49,15 +50,18 @@ detector_positions = np.load("outputs/detector_positions.npy")
 electric_field = np.load("outputs/electric_field.npy")
 magnetic_field = np.load("outputs/magnetic_field.npy")
 
+detector_positions = detector_positions.reshape(64, 64, 3)
 electric_field = electric_field.reshape(64, 64, 3)
 magnetic_field = magnetic_field.reshape(64, 64, 3)
 
 print("Plotting final state detected electric field")
 fig = plt.figure(figsize=(10, 6))
 fig.suptitle("Re-emitted radiation electric field")
+plt.imshow(np.real(electric_field[:, :, 1]))
 # plt.imshow(np.linalg.vector_norm(electric_field, axis=-1))
-plt.imshow(np.angle(electric_field[:, :, 0]))
+# plt.imshow(np.angle(electric_field[:, :, 0]))
 # plt.legend()
+plt.colorbar()
 plt.xlabel("Detector $x$")
 plt.ylabel("Detector $y$")
 plt.grid()
@@ -67,15 +71,31 @@ fig.savefig(plots_directory / "electric_field.pdf")
 print("Plotting final state detected magnetic field")
 fig = plt.figure(figsize=(10, 6))
 fig.suptitle("Re-emitted radiation magnetic field")
+plt.imshow(np.real(magnetic_field[:, :, 1]))
 # plt.imshow(np.linalg.vector_norm(magnetic_field, axis=-1))
-plt.imshow(np.angle(magnetic_field[:, :, 0]))
+# plt.imshow(np.angle(magnetic_field[:, :, 0]))
 # plt.legend()
+plt.colorbar()
 plt.xlabel("Detector $x$")
 plt.ylabel("Detector $y$")
 plt.grid()
 fig.savefig(plots_directory / "magnetic_field.pdf")
 
 final_angular_momenta = np.load("outputs/angular_momenta.npy")
+
+print("Plotting dL_z/dV")
+
+fig = plt.figure(figsize=(10, 6))
+fig.suptitle("$\\frac{dL_z}{dV}$")
+
+dL_z = compute_angular_momentum_derivative(
+    detector_positions, electric_field, omega_laser
+)
+
+plt.imshow(np.real(dL_z))
+plt.colorbar()
+plt.grid()
+fig.savefig(plots_directory / "orbital_angular_momentum.pdf")
 
 print("Maximum angular momentum:", final_angular_momenta.max())
 
