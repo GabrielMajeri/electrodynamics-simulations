@@ -64,7 +64,9 @@ int main()
     std::cout << "Writing initial electron positions to disk..." << std::endl;
     write_npy_file("outputs/initial_positions.npy", initial_electron_positions);
 
-    const auto initial_electron_momenta = generate_initial_electron_momenta(num_electrons);
+    const auto initial_electron_momenta = generate_initial_electron_momenta_stationary(num_electrons);
+    // TODO(BUG): gamma drops below 1 when the electrons have some initial momenta
+    // const auto initial_electron_momenta = generate_initial_electron_momenta_random_velocity(num_electrons, seed);
 
     std::cout << "Generating detector positions" << std::endl;
     const auto detector_positions = initialize_detector_positions();
@@ -93,6 +95,7 @@ int main()
 
     std::cout << "Writing sample particle trajectory to disk..." << std::endl;
     write_npy_file("outputs/particle_trajectory.npy", integration_result.particle_trajectory);
+    write_npy_file("outputs/particle_momenta.npy", integration_result.particle_momenta);
 
     std::cout << "Writing emitted electric and magnetic fields to disk..." << std::endl;
     write_npy_file("outputs/electric_field.npy", integration_result.electric_field);

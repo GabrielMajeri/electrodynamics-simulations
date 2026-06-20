@@ -50,13 +50,40 @@ std::vector<Position> generate_initial_electron_positions_within_disk(size_t num
     return positions;
 }
 
-std::vector<Momentum> generate_initial_electron_momenta(size_t num_electrons)
+std::vector<Momentum> generate_initial_electron_momenta_stationary(size_t num_electrons)
 {
     std::vector<Momentum> momenta(num_electrons);
 
     for (size_t i = 0; i < num_electrons; ++i)
     {
         momenta[i].gamma = 1;
+    }
+
+    return momenta;
+}
+
+std::vector<Momentum> generate_initial_electron_momenta_random_velocity(
+    std::size_t num_electrons, uint32_t seed)
+{
+    std::vector<Momentum> momenta(num_electrons);
+
+    constexpr Real max_velocity = (5.0 / 1000.0) * c;
+
+    std::uniform_real_distribution<Real>
+        unif_v(0.0, max_velocity);
+
+    std::default_random_engine rng(seed);
+
+    for (size_t i = 0; i < num_electrons; ++i)
+    {
+        const Vector3D v{unif_v(rng), unif_v(rng), unif_v(rng)};
+
+        const auto beta = v.norm() / c;
+
+        momenta[i].vx = v.x;
+        momenta[i].vy = v.y;
+        momenta[i].vz = v.z;
+        momenta[i].gamma = 1.0 / sqrt(1 - beta * beta);
     }
 
     return momenta;

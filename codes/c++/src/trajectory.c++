@@ -32,6 +32,7 @@ IntegrationResult analytic_trajectories(
     std::vector<Momentum> momenta(num_particles);
 
     std::vector<Position> particle_trajectory(num_steps + 1);
+    std::vector<Momentum> particle_momenta(num_steps + 1);
 
     const auto num_detector_points = detector_positions.size();
     std::vector<ComplexVector3D> electric_field(num_detector_points), magnetic_field(num_detector_points);
@@ -77,6 +78,7 @@ IntegrationResult analytic_trajectories(
             if (particle_index == 0)
             {
                 particle_trajectory[step] = new_position;
+                particle_momenta[step] = new_momentum;
             }
 
             positions[particle_index] = new_position;
@@ -90,6 +92,7 @@ IntegrationResult analytic_trajectories(
         positions,
         momenta,
         particle_trajectory,
+        particle_momenta,
         electric_field,
         magnetic_field,
     };
@@ -109,6 +112,7 @@ IntegrationResult integrate_trajectories(
     std::vector<Momentum> momenta = initial_momenta;
 
     std::vector<Position> particle_trajectory(num_steps + 1);
+    std::vector<Momentum> particle_momenta(num_steps + 1);
 
     const auto num_detector_points = detector_positions.size();
     std::vector<ComplexVector3D> electric_field(num_detector_points), magnetic_field(num_detector_points);
@@ -131,7 +135,8 @@ IntegrationResult integrate_trajectories(
             const auto previous_position = positions_arr[particle_index];
             const auto previous_momentum = momenta_arr[particle_index];
 
-            const auto [new_position, new_momentum] = perform_integration_step(previous_position, previous_momentum);
+            // const auto [new_position, new_momentum] = perform_integration_step_euler(previous_position, previous_momentum);
+            const auto [new_position, new_momentum] = perform_integration_step_rk4(previous_position, previous_momentum);
 
             integrate_scattered_field(
                 current_time, new_position, new_momentum,
@@ -141,6 +146,7 @@ IntegrationResult integrate_trajectories(
             if (particle_index == 0)
             {
                 particle_trajectory[step] = new_position;
+                particle_momenta[step] = new_momentum;
             }
 
             positions_arr[particle_index] = new_position;
@@ -154,6 +160,7 @@ IntegrationResult integrate_trajectories(
         positions,
         momenta,
         particle_trajectory,
+        particle_momenta,
         electric_field,
         magnetic_field,
     };

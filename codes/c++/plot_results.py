@@ -26,17 +26,21 @@ plot_particle_positions(fig, initial_positions[:, 1:4])
 fig.savefig(plots_directory / "initial_electron_positions.png")
 
 
-particle_trajectory = np.load("outputs/particle_trajectory.npy")
-
 print("Plotting sample electron trajectory")
+
+particle_trajectory = np.load("outputs/particle_trajectory.npy")
 
 fig, ax = plt.subplots(figsize=(10, 6))
 fig.suptitle("Electron trajectory")
 
-ax.plot(particle_trajectory[:, 1] - np.mean(particle_trajectory[:, 1]), label="x")
-ax.plot(particle_trajectory[:, 2] - np.mean(particle_trajectory[:, 2]), label="y")
+twin_ax = ax.twinx()
 
-ax.set_xlabel("Time $t$")
+twin_ax.plot(particle_trajectory[:, 0], label="$\\tau$", color="cyan")
+ax.plot(particle_trajectory[:, 1] - np.mean(particle_trajectory[:, 1]), label="$x$")
+ax.plot(particle_trajectory[:, 2] - np.mean(particle_trajectory[:, 2]), label="$y$")
+ax.plot(particle_trajectory[:, 3] - np.mean(particle_trajectory[:, 3]), label="$z$")
+
+ax.set_xlabel("Proper time $t$")
 ax.set_ylabel("Displacement")
 
 fig.legend()
@@ -45,6 +49,30 @@ fig.tight_layout()
 
 fig.savefig(plots_directory / "electron_trajectory.pdf")
 
+
+print("Plotting sample electron momenta")
+
+particle_momenta = np.load("outputs/particle_momenta.npy")
+
+fig, ax = plt.subplots(figsize=(10, 6))
+fig.suptitle("Electron momenta")
+
+t_ax = ax.twinx()
+
+t_ax.plot(particle_momenta[:, 0], label="$\\gamma$", color="red")
+ax.plot(particle_momenta[:, 1], label="$p_x$")
+ax.plot(particle_momenta[:, 2], label="$p_y$")
+ax.plot(particle_momenta[:, 3], label="$p_z$")
+
+ax.set_xlabel("Proper time $t$")
+ax.set_ylabel("Momentum")
+t_ax.set_ylabel("Relativistic factor")
+
+fig.legend()
+ax.grid()
+fig.tight_layout()
+
+fig.savefig(plots_directory / "electron_momenta.pdf")
 
 detector_positions = np.load("outputs/detector_positions.npy")
 electric_field = np.load("outputs/electric_field.npy")

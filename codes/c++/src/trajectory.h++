@@ -10,6 +10,7 @@ struct IntegrationResult
     std::vector<Momentum> momenta;
 
     std::vector<Position> particle_trajectory;
+    std::vector<Momentum> particle_momenta;
 
     std::vector<ComplexVector3D> electric_field;
     std::vector<ComplexVector3D> magnetic_field;

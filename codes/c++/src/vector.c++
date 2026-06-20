@@ -1,6 +1,12 @@
 #include "vector.h++"
 
 #include <cmath>
+#include <iostream>
+
+Acceleration operator+(Acceleration a1, Acceleration a2)
+{
+    return {a1.dgamma + a2.dgamma, a1.dvx + a2.dvx, a1.dvy + a2.dvy, a1.dvz + a2.dvz};
+}
 
 Acceleration operator*(Real scalar, Acceleration acc)
 {
@@ -15,6 +21,13 @@ Momentum operator+(Momentum m, Acceleration acc)
 Momentum operator*(Real scalar, Momentum m)
 {
     return {scalar * m.gamma, scalar * m.vx, scalar * m.vy, scalar * m.vz};
+}
+
+std::ostream &operator<<(std::ostream &out, Momentum m)
+{
+    out << m.gamma << ' ' << m.vx << ' ' << m.vy << ' ' << m.vz;
+
+    return out;
 }
 
 Position operator+(Position p, Momentum m)

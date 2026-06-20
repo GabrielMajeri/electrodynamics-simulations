@@ -17,6 +17,7 @@ static std::vector<char> &operator+=(std::vector<char> &v, const char *s)
 
 template void write_npy_file(const char file_path[], const std::vector<Real> &array);
 template void write_npy_file(const char file_path[], const std::vector<Position> &array);
+template void write_npy_file(const char file_path[], const std::vector<Momentum> &array);
 template void write_npy_file(const char file_path[], const std::vector<Vector3D> &array);
 template void write_npy_file(const char file_path[], const std::vector<ComplexVector3D> &array);
 

@@ -5,7 +5,11 @@
 #include "vector.h++"
 
 OPENACC_ROUTINE
-std::pair<Position, Momentum> perform_integration_step(
+std::pair<Position, Momentum> perform_integration_step_euler(
+    Position previous_position, Momentum previous_momentum);
+
+OPENACC_ROUTINE
+std::pair<Position, Momentum> perform_integration_step_rk4(
     Position previous_position, Momentum previous_momentum);
 
 OPENACC_ROUTINE

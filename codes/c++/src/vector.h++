@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iosfwd>
+
 #include "common.h++"
 #include "types.h++"
 
@@ -22,6 +24,9 @@ struct Acceleration
 };
 
 OPENACC_ROUTINE
+Acceleration operator+(Acceleration a1, Acceleration a2);
+
+OPENACC_ROUTINE
 Acceleration operator*(Real scalar, Acceleration acc);
 
 OPENACC_ROUTINE
@@ -29,6 +34,8 @@ Momentum operator+(Momentum m, Acceleration acc);
 
 OPENACC_ROUTINE
 Momentum operator*(Real scalar, Momentum m);
+
+std::ostream &operator<<(std::ostream &out, Momentum m);
 
 OPENACC_ROUTINE
 Position operator+(Position p, Momentum m);

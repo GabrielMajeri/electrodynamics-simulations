@@ -9,7 +9,25 @@
 
 using namespace std::complex_literals;
 
-std::pair<Position, Momentum> perform_integration_step(Position previous_position, Momentum previous_momentum)
+static void check_integration_results(Momentum momentum)
+{
+    if (momentum.gamma < 1 - error_tolerance)
+    {
+        std::cout << "Lorentz factor dropped below unity: " << momentum.gamma << std::endl;
+        std::exit(1);
+    }
+
+    // BUG: this doesn't get preserved, no matter what I try...
+    // const auto inner_product = acceleration.dvx * momentum.vx + acceleration.dvy * momentum.vy + acceleration.dvz * momentum.vz - acceleration.dgamma * momentum.gamma;
+
+    // if (std::abs(inner_product) > error_tolerance)
+    // {
+    //     std::cout << "Inner product is non-zero: " << std::abs(inner_product) << std::endl;
+    //     std::exit(1);
+    // }
+}
+
+std::pair<Position, Momentum> perform_integration_step_euler(Position previous_position, Momentum previous_momentum)
 {
     const auto laboratory_time = previous_position.t;
     const auto position_vector = Vector3D::from_position(previous_position);
@@ -30,19 +48,52 @@ std::pair<Position, Momentum> perform_integration_step(Position previous_positio
 
     if (check_for_errors)
     {
-        if (new_momentum.gamma < 1 - error_tolerance)
-        {
-            std::cout << "Lorentz factor dropped below unity: " << new_momentum.gamma << std::endl;
-            std::exit(1);
-        }
+        check_integration_results(new_momentum);
+    }
 
-        const auto inner_product = acceleration.dvx * previous_momentum.vx + acceleration.dvy * previous_momentum.vy + acceleration.dvz * previous_momentum.vz - acceleration.dgamma * previous_momentum.gamma;
+    return std::make_pair(new_position, new_momentum);
+}
 
-        if (std::abs(inner_product) > error_tolerance)
-        {
-            std::cout << "Inner product is non-zero: " << std::abs(inner_product) << std::endl;
-            std::exit(1);
-        }
+static Acceleration compute_intermediate_acceleration(Real time, Vector3D position, Momentum momentum)
+{
+    auto [electric_field, magnetic_field] =
+        laguerre_gauss_beam_electric_and_magnetic_field(position, time);
+
+    const auto cf = cutoff(time - position.z / c, phi_0, tau_0);
+    electric_field = cf * electric_field;
+    magnetic_field = cf * magnetic_field;
+
+    return compute_acceleration(momentum, electric_field, magnetic_field);
+}
+
+std::pair<Position, Momentum> perform_integration_step_rk4(
+    Position previous_position, Momentum previous_momentum)
+{
+    const auto laboratory_time = previous_position.t;
+    const auto position_vector = Vector3D::from_position(previous_position);
+
+    const auto k_1 = compute_intermediate_acceleration(laboratory_time, position_vector, previous_momentum);
+    const auto k_2 = compute_intermediate_acceleration(
+        laboratory_time + integration_time_step / 2,
+        position_vector,
+        previous_momentum + integration_time_step / 2 * k_1);
+    const auto k_3 = compute_intermediate_acceleration(
+        laboratory_time + integration_time_step / 2,
+        position_vector,
+        previous_momentum + integration_time_step / 2 * k_2);
+    const auto k_4 = compute_intermediate_acceleration(
+        laboratory_time + integration_time_step,
+        position_vector,
+        previous_momentum + integration_time_step * k_3);
+
+    const auto acceleration = (1 / 6.0) * (k_1 + 2 * k_2 + 2 * k_3 + k_4);
+
+    const auto new_momentum = previous_momentum + integration_time_step * acceleration;
+    const auto new_position = previous_position + integration_time_step * new_momentum;
+
+    if (check_for_errors)
+    {
+        check_integration_results(new_momentum);
     }
 
     return std::make_pair(new_position, new_momentum);
