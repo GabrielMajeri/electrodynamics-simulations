@@ -12,7 +12,7 @@ std::vector<Real> compute_angular_momenta_in_z_direction(
         const auto position = positions[index];
         const auto momentum = momenta[index];
 
-        angular_momenta[index] = particle_mass * (position.x * momentum.vy - position.y * momentum.vx);
+        angular_momenta[index] = particle_mass * (position.x * momentum.u2 - position.y * momentum.u1);
     }
 
     return angular_momenta;

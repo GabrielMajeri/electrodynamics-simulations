@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from electrodynamics.angular_momentum import compute_angular_momentum_derivative
-from electrodynamics.constants import lmbd, omega_laser
+from electrodynamics.constants import c, lmbd, omega_laser
 from electrodynamics.plotting import (
     plot_angular_momentum_distribution,
     plot_particle_positions,
@@ -59,7 +59,7 @@ fig.suptitle("Electron momenta")
 
 t_ax = ax.twinx()
 
-t_ax.plot(particle_momenta[:, 0], label="$\\gamma$", color="red")
+t_ax.plot(particle_momenta[:, 0] / c, label="$\\gamma$", color="red")
 ax.plot(particle_momenta[:, 1], label="$p_x$")
 ax.plot(particle_momenta[:, 2], label="$p_y$")
 ax.plot(particle_momenta[:, 3], label="$p_z$")

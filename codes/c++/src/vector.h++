@@ -14,13 +14,13 @@ struct Position
 /// @brief Momentum 4-vector. Contains the relativistic factor and the momentum of the particle.
 struct Momentum
 {
-    Real gamma, vx, vy, vz;
+    Real u0, u1, u2, u3;
 };
 
 /// @brief Acceleration 4-vector.
 struct Acceleration
 {
-    Real dgamma, dvx, dvy, dvz;
+    Real du0, du1, du2, du3;
 };
 
 OPENACC_ROUTINE
@@ -52,7 +52,7 @@ struct Vector3D
 
     static inline Vector3D from_momentum(const Momentum &momentum)
     {
-        return {momentum.vx, momentum.vy, momentum.vz};
+        return {momentum.u1, momentum.u2, momentum.u3};
     }
 
     Real dot(const Vector3D &rhs) const noexcept;

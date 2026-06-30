@@ -5,34 +5,34 @@
 
 Acceleration operator+(Acceleration a1, Acceleration a2)
 {
-    return {a1.dgamma + a2.dgamma, a1.dvx + a2.dvx, a1.dvy + a2.dvy, a1.dvz + a2.dvz};
+    return {a1.du0 + a2.du0, a1.du1 + a2.du1, a1.du2 + a2.du2, a1.du3 + a2.du3};
 }
 
 Acceleration operator*(Real scalar, Acceleration acc)
 {
-    return {scalar * acc.dgamma, scalar * acc.dvx, scalar * acc.dvy, scalar * acc.dvz};
+    return {scalar * acc.du0, scalar * acc.du1, scalar * acc.du2, scalar * acc.du3};
 }
 
 Momentum operator+(Momentum m, Acceleration acc)
 {
-    return {m.gamma + acc.dgamma, m.vx + acc.dvx, m.vy + acc.dvy, m.vz + acc.dvz};
+    return {m.u0 + acc.du0, m.u1 + acc.du1, m.u2 + acc.du2, m.u3 + acc.du3};
 }
 
 Momentum operator*(Real scalar, Momentum m)
 {
-    return {scalar * m.gamma, scalar * m.vx, scalar * m.vy, scalar * m.vz};
+    return {scalar * m.u0, scalar * m.u1, scalar * m.u2, scalar * m.u3};
 }
 
 std::ostream &operator<<(std::ostream &out, Momentum m)
 {
-    out << m.gamma << ' ' << m.vx << ' ' << m.vy << ' ' << m.vz;
+    out << m.u0 << ' ' << m.u1 << ' ' << m.u2 << ' ' << m.u3;
 
     return out;
 }
 
 Position operator+(Position p, Momentum m)
 {
-    return {p.t + m.gamma, p.x + m.vx, p.y + m.vy, p.z + m.vz};
+    return {p.t + m.u0, p.x + m.u1, p.y + m.u2, p.z + m.u3};
 }
 
 OPENACC_ROUTINE

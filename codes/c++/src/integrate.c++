@@ -9,53 +9,56 @@
 
 using namespace std::complex_literals;
 
-static void check_integration_results(Momentum momentum)
+static void check_integration_results(Momentum momentum, Acceleration acceleration)
 {
-    if (momentum.gamma < 1 - error_tolerance)
+    if (momentum.u0 < c - error_tolerance)
     {
-        std::cout << "Lorentz factor dropped below unity: " << momentum.gamma << std::endl;
+        std::cout << "Lorentz factor dropped below unity: " << momentum.u0 << std::endl;
         std::exit(1);
     }
 
-    // BUG: this doesn't get preserved, no matter what I try...
-    // const auto inner_product = acceleration.dvx * momentum.vx + acceleration.dvy * momentum.vy + acceleration.dvz * momentum.vz - acceleration.dgamma * momentum.gamma;
+    const auto inner_product = acceleration.du1 * momentum.u1 + acceleration.du2 * momentum.u2 + acceleration.du3 * momentum.u3 - acceleration.du0 * momentum.u0;
 
-    // if (std::abs(inner_product) > error_tolerance)
-    // {
-    //     std::cout << "Inner product is non-zero: " << std::abs(inner_product) << std::endl;
-    //     std::exit(1);
-    // }
+    if (std::abs(inner_product) > error_tolerance)
+    {
+        std::cout << "Inner product is non-zero: " << std::abs(inner_product) << std::endl;
+        std::exit(1);
+    }
 }
 
 std::pair<Position, Momentum> perform_integration_step_euler(Position previous_position, Momentum previous_momentum)
 {
-    const auto laboratory_time = previous_position.t;
+    const auto laboratory_time = previous_position.t / c;
     const auto position_vector = Vector3D::from_position(previous_position);
 
     // Compute EM field vectors for previous position
+    // auto [electric_field, magnetic_field] = plane_wave_electric_and_magnetic_field(position_vector, laboratory_time);
+    // auto [electric_field, magnetic_field] = gauss_beam_electric_and_magnetic_field(position_vector, laboratory_time);
     auto [electric_field, magnetic_field] =
         laguerre_gauss_beam_electric_and_magnetic_field(position_vector, laboratory_time);
 
-    const auto cf = cutoff(laboratory_time - previous_position.z / c, phi_0, tau_0);
+    const auto cf = cutoff((previous_position.t - previous_position.z) / c, phi_0, tau_0);
     electric_field = cf * electric_field;
     magnetic_field = cf * magnetic_field;
 
     // Symplectic Euler integration step
     const auto acceleration = compute_acceleration(previous_momentum, electric_field, magnetic_field);
 
-    const auto new_momentum = previous_momentum + integration_time_step * acceleration;
-    const auto new_position = previous_position + integration_time_step * new_momentum;
-
     if (check_for_errors)
     {
-        check_integration_results(new_momentum);
+        check_integration_results(previous_momentum, acceleration);
     }
+
+    const auto new_momentum = previous_momentum + integration_time_step * acceleration;
+    const auto new_position = previous_position + integration_time_step * new_momentum;
 
     return std::make_pair(new_position, new_momentum);
 }
 
 static Acceleration compute_intermediate_acceleration(Real time, Vector3D position, Momentum momentum)
 {
+    // auto [electric_field, magnetic_field] = plane_wave_electric_and_magnetic_field(position, time);
+    // auto [electric_field, magnetic_field] = gauss_beam_electric_and_magnetic_field(position, time);
     auto [electric_field, magnetic_field] =
         laguerre_gauss_beam_electric_and_magnetic_field(position, time);
 
@@ -69,7 +72,7 @@ static Acceleration compute_intermediate_acceleration(Real time, Vector3D positi
 std::pair<Position, Momentum> perform_integration_step_rk4(
     Position previous_position, Momentum previous_momentum)
 {
-    const auto laboratory_time = previous_position.t;
+    const auto laboratory_time = previous_position.t / c;
     const auto position_vector = Vector3D::from_position(previous_position);
 
     const auto k_1 = compute_intermediate_acceleration(laboratory_time, position_vector, previous_momentum);
@@ -86,27 +89,27 @@ std::pair<Position, Momentum> perform_integration_step_rk4(
         position_vector,
         previous_momentum + integration_time_step * k_3);
 
+    if (check_for_errors)
+    {
+        check_integration_results(previous_momentum, k_1);
+    }
+
     const auto acceleration = (1 / 6.0) * (k_1 + 2 * k_2 + 2 * k_3 + k_4);
 
     const auto new_momentum = previous_momentum + integration_time_step * acceleration;
     const auto new_position = previous_position + integration_time_step * new_momentum;
-
-    if (check_for_errors)
-    {
-        check_integration_results(new_momentum);
-    }
 
     return std::make_pair(new_position, new_momentum);
 }
 
 Acceleration compute_acceleration(Momentum previous_momentum, Vector3D electric_field, Vector3D magnetic_field)
 {
-    const auto agamma = previous_momentum.vx * electric_field.x / c + previous_momentum.vy * electric_field.y / c + previous_momentum.vz * electric_field.z / c;
-    const auto ax = previous_momentum.gamma * electric_field.x / c + previous_momentum.vy * magnetic_field.z - previous_momentum.vz * magnetic_field.y;
-    const auto ay = previous_momentum.gamma * electric_field.y / c - previous_momentum.vx * magnetic_field.z + previous_momentum.vz * magnetic_field.x;
-    const auto az = previous_momentum.gamma * electric_field.z / c + previous_momentum.vx * magnetic_field.y - previous_momentum.vy * magnetic_field.x;
+    const auto du0 = previous_momentum.u1 * electric_field.x / c + previous_momentum.u2 * electric_field.y / c + previous_momentum.u3 * electric_field.z / c;
+    const auto du1 = previous_momentum.u0 * electric_field.x / c + previous_momentum.u2 * magnetic_field.z - previous_momentum.u3 * magnetic_field.y;
+    const auto du2 = previous_momentum.u0 * electric_field.y / c - previous_momentum.u1 * magnetic_field.z + previous_momentum.u3 * magnetic_field.x;
+    const auto du3 = previous_momentum.u0 * electric_field.z / c + previous_momentum.u1 * magnetic_field.y - previous_momentum.u2 * magnetic_field.x;
 
-    const Acceleration acceleration_direction{agamma, ax, ay, az};
+    const Acceleration acceleration_direction{du0, du1, du2, du3};
     return charge_to_mass_ratio * acceleration_direction;
 }
 

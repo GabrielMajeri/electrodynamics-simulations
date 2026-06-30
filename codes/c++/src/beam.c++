@@ -8,6 +8,83 @@ using namespace std::complex_literals;
 
 constexpr Real tolerance = 1e-5;
 
+std::pair<Vector3D, Vector3D> plane_wave_electric_and_magnetic_field(
+    Vector3D position, Real time)
+{
+    const auto [x, y, z] = position;
+
+    // k
+    const Real wavenumber = 2 * pi / wavelength;
+
+    std::complex<Real> magnitude = amplitude;
+
+    std::complex<Real> phase = std::exp(1i * (angular_velocity * time - wavenumber * z));
+
+    Complex coeff = magnitude * phase;
+
+    Complex E_x = coeff * polarization.get_x(),
+            E_y = coeff * polarization.get_y(),
+            E_z = 0;
+
+    Vector3D E = {E_x.real(), E_y.real(), E_z.real()};
+
+    Complex B_x = -E_y / c,
+            B_y = E_x / c,
+            B_z = 0;
+
+    Vector3D B = {B_x.real(), B_y.real(), B_z.real()};
+
+    return std::make_pair(E, B);
+}
+
+std::pair<Vector3D, Vector3D> gauss_beam_electric_and_magnetic_field(
+    Vector3D position, Real time)
+{
+    const auto [x, y, z] = position;
+    const Real r = std::sqrt(x * x + y * y);
+
+    const Real rayleigh_length = pi * std::pow(waist_radius, 2) / wavelength;
+
+    // w(z)
+    const Real width = waist_radius * std::sqrt(1 + std::pow(z / rayleigh_length, 2));
+
+    // r / w(z)
+    const Real r_over_width = r / width;
+    const Real r_over_width_squared = std::pow(r_over_width, 2);
+
+    // k
+    const Real wavenumber = 2 * pi / wavelength;
+
+    // R(z)
+    const Real radius_of_curvature = std::abs(z) < tolerance ? 0 : z * (1 + std::pow(rayleigh_length / z, 2));
+
+    // r^2/(2 * R(z))
+    const Real curvature = radius_of_curvature < tolerance ? 0 : std::pow(r, 2) / (2 * radius_of_curvature);
+
+    // \psi(z)
+    const auto gouy_phase = std::atan2(z, rayleigh_length);
+
+    std::complex<Real> magnitude = amplitude * (waist_radius / width) * std::exp(-r_over_width_squared);
+
+    std::complex<Real> phase = std::exp(1i * (angular_velocity * time - wavenumber * z + wavenumber * curvature - gouy_phase));
+
+    Complex coeff = magnitude * phase;
+
+    Complex E_x = coeff * polarization.get_x(),
+            E_y = coeff * polarization.get_y(),
+            E_z = 2i / (wavenumber * std::pow(width, 2)) * (x * E_x + y * E_y);
+
+    Vector3D E = {E_x.real(), E_y.real(), E_z.real()};
+
+    Complex B_x = -E_y / c,
+            B_y = E_x / c,
+            B_z = 1i / (angular_velocity * std::pow(width, 2)) * (y * E_x - x * E_y);
+
+    Vector3D B = {B_x.real(), B_y.real(), B_z.real()};
+
+    return std::make_pair(E, B);
+}
+
 std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     Vector3D position, Real time)
 {

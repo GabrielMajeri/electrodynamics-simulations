@@ -8,6 +8,14 @@
 #include "vector.h++"
 
 OPENACC_ROUTINE
+std::pair<Vector3D, Vector3D> plane_wave_electric_and_magnetic_field(
+    Vector3D position, Real time);
+
+OPENACC_ROUTINE
+std::pair<Vector3D, Vector3D> gauss_beam_electric_and_magnetic_field(
+    Vector3D position, Real time);
+
+OPENACC_ROUTINE
 std::pair<Vector3D, Vector3D> laguerre_gauss_beam_electric_and_magnetic_field(
     Vector3D position, Real time);
 

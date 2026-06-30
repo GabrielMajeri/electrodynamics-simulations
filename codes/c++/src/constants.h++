@@ -15,10 +15,10 @@ constexpr Real c = 137.036;
 #pragma acc declare copyin(c)
 #endif
 
-// constexpr size_t num_electrons = 2;
+// constexpr size_t num_electrons = 1;
 // constexpr size_t num_electrons = 32;
-constexpr size_t num_electrons = 1 * 1024;
-// constexpr size_t num_electrons = 4 * 1024;
+// constexpr size_t num_electrons = 1 * 1024;
+constexpr size_t num_electrons = 4 * 1024;
 // constexpr size_t num_electrons = 8 * 1024;
 // constexpr size_t num_electrons = 16 * 1024;
 // constexpr std::size_t num_electrons = 64 * 1024;
