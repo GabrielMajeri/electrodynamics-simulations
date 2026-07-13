@@ -1,11 +1,8 @@
-from numba import njit
 import numpy as np
-
 
 from .typing import RealArray
 
 
-@njit(cache=True)
 def generate_initial_positions_on_disk(
     generator: np.random.Generator, disk_radius: float, num_particles: int
 ) -> RealArray:

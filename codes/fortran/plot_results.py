@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 
+from math import pi
 from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-from electrodynamics.constants import lmbd
+from electrodynamics.constants import SPEED_OF_LIGHT
 from electrodynamics.plotting import (
     plot_angular_momentum_distribution,
     plot_particle_positions,
 )
 
+c = SPEED_OF_LIGHT
+omega_laser = 0.057
+lmbd = (2 * pi * c) / omega_laser
 
 initial_positions = np.load("initial_positions.npy").T
 final_angular_momenta = np.load("angular_momenta.npy").T

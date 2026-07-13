@@ -23,15 +23,20 @@ def plot_particle_positions(fig: Figure, positions: RealArray) -> None:
 
 
 def plot_angular_momentum_distribution(
-    fig: Figure, initial_positions: RealArray, waist_radius: float, momenta: RealArray
+    fig: Figure,
+    initial_positions: RealArray,
+    waist_radius: float,
+    momenta: RealArray,
+    with_title: bool = True,
 ) -> None:
     print("Plotting angular momentum distribution of initial conditions")
 
     ax = fig.add_subplot()
 
-    ax.set_title("Normalized angular momentum distribution")
+    if with_title:
+        ax.set_title("Normalized angular momentum distribution")
 
-    momenta /= momenta.max()
+    momenta = momenta / momenta.max()
 
     momenta = np.ma.masked_where(np.abs(momenta) < 1e-2, momenta)
     initial_positions = np.ma.masked_array(

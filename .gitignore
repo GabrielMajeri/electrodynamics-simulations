@@ -24,5 +24,8 @@ __pycache__/
 # MacOS-generated files
 **/.DS_Store
 
+# Configured cache for JAX jitted functions
+jax_cache/
+
 # Default CMake build directory
 build/

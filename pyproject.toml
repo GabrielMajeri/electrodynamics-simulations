@@ -5,22 +5,19 @@ description = "Numerical solutions of the classical electrodynamics equations."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "jax>=0.10.2",
+    "jax-dataclasses>=1.6.3",
     "matplotlib>=3.10.8",
     "numba>=0.65.1",
     "numpy>=2.4.1",
     "scipy>=1.17.1",
     "tqdm>=4.67.3",
+    "typer>=0.26.8",
 ]
 
-[project.optional-dependencies]
-gpu = ["cupy>=13.6.0", "pykeops>=2.3"]
-
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.11.28,<0.12"]
+build-backend = "uv_build"
 
-[tool.hatch.build.targets.sdist]
-include = ["src/electrodynamics/**"]
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/electrodynamics"]
+[tool.uv.build-backend]
+module-name = "electrodynamics"
