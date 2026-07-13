@@ -28,7 +28,7 @@ c = SPEED_OF_LIGHT
 
 
 @jdc.jit
-def cutoff(
+def gaussian_envelope(
     phi: jax.Array, phi_0: jdc.Static[float], tau_0: jdc.Static[float]
 ) -> jax.Array:
     t = (phi - phi_0) / tau_0
@@ -36,7 +36,7 @@ def cutoff(
 
 
 @jdc.pytree_dataclass
-class PulseParameters:
+class GaussianPulseParameters:
     phi_0: float
     tau_0: float
 
@@ -68,11 +68,13 @@ def compute_intermediate_acceleration(
     position: jax.Array,
     momentum: jax.Array,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[PulseParameters],
+    pulse_parameters: jdc.Static[GaussianPulseParameters],
 ) -> jax.Array:
     _, _, _, z = position.T
 
-    modulation = cutoff(time - z / c, pulse_parameters.phi_0, pulse_parameters.tau_0)
+    modulation = gaussian_envelope(
+        time - z / c, pulse_parameters.phi_0, pulse_parameters.tau_0
+    )
     modulation = jnp.expand_dims(modulation, axis=-1)
 
     # electric_field, magnetic_field = compute_plane_wave_fields(
@@ -96,7 +98,7 @@ def compute_new_momentum(
     previous_momentum: jax.Array,
     time_step: float,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[PulseParameters],
+    pulse_parameters: jdc.Static[GaussianPulseParameters],
 ) -> jax.Array:
     tc, _, _, _ = previous_position.T
     laboratory_time = tc / c
@@ -246,7 +248,7 @@ def compute_particle_trajectory(
     end_time: jdc.Static[float],
     time_step: jdc.Static[float],
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[PulseParameters],
+    pulse_parameters: jdc.Static[GaussianPulseParameters],
 ) -> tuple[jax.Array, jax.Array]:
     "Compute the trajectory of a single particle under the action of the laser pulse."
 
@@ -283,43 +285,26 @@ type IterationState = tuple[
 
 
 @jax.shard_map(
-    in_specs=(
-        P("i"),
-        P("i"),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    ),
-    out_specs=(P("i"), P("i"), P("i"), P("i"), P("i"), P("i")),
+    in_specs=(P("i"),) * 2 + (None,) * 10,
+    out_specs=(P("i"),) * 6,
 )
-def integrate_particle(
-    initial_position: jax.Array,
-    initial_momentum: jax.Array,
+def integrate_particles(
+    initial_positions: jax.Array,
+    initial_momenta: jax.Array,
     start_time: jdc.Static[float],
     end_time: jdc.Static[float],
     time_step: jdc.Static[float],
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[PulseParameters],
+    pulse_parameters: jdc.Static[GaussianPulseParameters],
     central_frequency: jdc.Static[float],
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
     detector_parameters: jdc.Static[DetectorParameters],
-    detector_positions: jax.Array,
+    detector_positions: jdc.Static[jax.Array],
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Compute the trajectory and the scattered radiation from a single particle
+    """Compute the trajectory and the scattered radiation from particles
     under the action of the laser pulse.
-
-    This function will get vectorized/parallelized.
     """
-
-    batch_size = len(initial_position)
 
     frequencies = np.linspace(
         central_frequency - frequency_width / 2,
@@ -331,6 +316,8 @@ def integrate_particle(
         (5 * laser_parameters.wavelength, 0.0, detector_parameters.z_distance)
         # (0 * laser_parameters.wavelength, 0.0, detector_parameters.z_distance)
     )
+
+    batch_size = len(initial_positions)
 
     scattered_electric_field = jnp.zeros(
         shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128
@@ -375,29 +362,29 @@ def integrate_particle(
     def scan_fn(u: IterationState, _: None) -> tuple[IterationState, None]:
         (
             proper_time,
-            previous_position,
-            previous_momentum,
+            previous_positions,
+            previous_momenta,
             previous_scattered_electric_field,
             previous_scattered_magnetic_field,
             previous_detector_electric_field,
             previous_detector_magnetic_field,
         ) = u
 
-        new_momentum = compute_new_momentum(
-            previous_position,
-            previous_momentum,
+        new_momenta = compute_new_momentum(
+            previous_positions,
+            previous_momenta,
             time_step,
             laser_parameters,
             pulse_parameters,
         )
-        new_position = previous_position + time_step * new_momentum
+        new_position = previous_positions + time_step * new_momenta
 
         electric_field, magnetic_field = compute_scattered_fields_for_all_frequencies(
             proper_time,
             frequencies,
             new_position,
-            new_momentum,
-            initial_position,
+            new_momenta,
+            initial_positions,
             spectrum_measurement_position,
         )
         new_scattered_electric_field = (
@@ -412,8 +399,8 @@ def integrate_particle(
                 proper_time,
                 central_frequency,
                 new_position,
-                new_momentum,
-                initial_position,
+                new_momenta,
+                initial_positions,
                 detector_positions,
             )
         )
@@ -424,13 +411,10 @@ def integrate_particle(
             previous_detector_magnetic_field + time_step * magnetic_field
         )
 
-        previous_position = new_position
-        previous_momentum = new_momentum
-
         u_next = (
             proper_time + time_step,
             new_position,
-            new_momentum,
+            new_momenta,
             new_scattered_electric_field,
             new_scattered_magnetic_field,
             new_detector_electric_field,
@@ -453,8 +437,8 @@ def integrate_particle(
         scan_fn,
         (
             start_time,
-            initial_position,
-            initial_momentum,
+            initial_positions,
+            initial_momenta,
             scattered_electric_field,
             scattered_magnetic_field,
             detector_electric_field,
@@ -463,12 +447,6 @@ def integrate_particle(
         None,
         length=num_time_steps,
     )
-
-    scattered_electric_field = jax.lax.psum(scattered_electric_field, "i")
-    scattered_magnetic_field = jax.lax.psum(scattered_magnetic_field, "i")
-
-    detector_electric_field = jax.lax.psum(detector_electric_field, "i")
-    detector_magnetic_field = jax.lax.psum(detector_magnetic_field, "i")
 
     return (
         final_position,
@@ -505,12 +483,12 @@ def simulate_trajectories(
     end_time: jdc.Static[float],
     time_step: jdc.Static[float],
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[PulseParameters],
+    pulse_parameters: jdc.Static[GaussianPulseParameters],
     central_frequency: jdc.Static[float],
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
     detector_parameters: jdc.Static[DetectorParameters],
-    detector_positions: jax.Array,
+    detector_positions: jdc.Static[jax.Array],
 ) -> IntegrationResult:
     print("Integrating trajectory for sample particle")
 
@@ -530,51 +508,69 @@ def simulate_trajectories(
     print("Integrating trajectory for all particles and computing scattered field")
 
     num_devices = len(jax.devices())
-    print(f"Mesh grid size: {num_devices}")
+    # print(f"Mesh grid size: {num_devices}")
 
     mesh = jax.make_mesh((num_devices,), ("i",))
     with jax.set_mesh(mesh):
-        initial_positions = jax.device_put(initial_positions, P("i", None))
-        initial_momenta = jax.device_put(initial_momenta, P("i", None))
+        batch_size = 1024
+        num_batches = len(initial_positions) // batch_size
 
-        (
-            final_positions,
-            final_momenta,
-            scattered_electric_field_spectrum,
-            scattered_magnetic_field_spectrum,
-            detector_electric_field,
-            detector_magnetic_field,
-        ) = integrate_particle(
-            initial_positions,
-            initial_momenta,
-            start_time,
-            end_time,
-            time_step,
-            laser_parameters,
-            pulse_parameters,
-            central_frequency,
-            frequency_width,
-            num_frequencies,
-            detector_parameters,
-            detector_positions,
+        batches = zip(
+            jnp.split(initial_positions, num_batches, axis=0),
+            jnp.split(initial_momenta, num_batches, axis=0),
         )
 
-    scattered_electric_field_spectrum = jnp.sum(
-        scattered_electric_field_spectrum, axis=0
-    ).block_until_ready()
-    scattered_magnetic_field_spectrum = jnp.sum(
-        scattered_magnetic_field_spectrum, axis=0
-    ).block_until_ready()
+        final_positions = []
+        final_momenta = []
+        scattered_electric_field_spectrum = jnp.zeros((num_frequencies, 3))
+        scattered_magnetic_field_spectrum = jnp.zeros((num_frequencies, 3))
+        detector_electric_field = jnp.zeros((len(detector_positions), 3))
+        detector_magnetic_field = jnp.zeros((len(detector_positions), 3))
 
-    detector_electric_field = jnp.sum(
-        detector_electric_field, axis=0
-    ).block_until_ready()
-    detector_magnetic_field = jnp.sum(
-        detector_magnetic_field, axis=0
-    ).block_until_ready()
+        for index, batch in enumerate(batches):
+            print(f"Batch #{index}")
+            batch_positions = jax.device_put(batch[0], P("i", None))
+            batch_momenta = jax.device_put(batch[1], P("i", None))
 
-    final_positions = final_positions.block_until_ready()
-    final_momenta = final_momenta.block_until_ready()
+            (
+                batch_final_positions,
+                batch_final_momenta,
+                batch_scattered_electric_field_spectrum,
+                batch_scattered_magnetic_field_spectrum,
+                batch_detector_electric_field,
+                batch_detector_magnetic_field,
+            ) = integrate_particles(
+                batch_positions,
+                batch_momenta,
+                start_time,
+                end_time,
+                time_step,
+                laser_parameters,
+                pulse_parameters,
+                central_frequency,
+                frequency_width,
+                num_frequencies,
+                detector_parameters,
+                detector_positions,
+            )
+
+            final_positions.append(batch_final_positions.block_until_ready())
+            final_momenta.append(batch_final_momenta.block_until_ready())
+            scattered_electric_field_spectrum += jnp.sum(
+                batch_scattered_electric_field_spectrum, axis=0
+            ).block_until_ready()
+            scattered_magnetic_field_spectrum += jnp.sum(
+                batch_scattered_magnetic_field_spectrum, axis=0
+            ).block_until_ready()
+            detector_electric_field += jnp.sum(
+                batch_detector_electric_field, axis=0
+            ).block_until_ready()
+            detector_magnetic_field += jnp.sum(
+                batch_detector_magnetic_field, axis=0
+            ).block_until_ready()
+
+        final_positions = jnp.concatenate(final_positions)
+        final_momenta = jnp.concatenate(final_momenta)
 
     return IntegrationResult(
         np.arange(start_time, end_time + time_step / 2, time_step),
@@ -683,7 +679,7 @@ def main() -> None:
     tau_0 = 10 / laser_frequency
     phi_0 = 3 * tau_0
 
-    pulse_parameters = PulseParameters(phi_0, tau_0)
+    pulse_parameters = GaussianPulseParameters(phi_0, tau_0)
 
     integration_start_time = 0.0
     integration_end_time = 6 * tau_0
@@ -703,8 +699,8 @@ def main() -> None:
         width=40 * 75 * laser_wavelength,
         height=40 * 75 * laser_wavelength,
         z_distance=-2 * 100_000 * laser_wavelength,
-        grid_size_x=64,
-        grid_size_y=64,
+        grid_size_x=128,
+        grid_size_y=128,
     )
 
     detector_positions = initialize_detector_positions(detector_parameters)
