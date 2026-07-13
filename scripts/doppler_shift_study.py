@@ -1,5 +1,5 @@
 from math import pi
-import multiprocessing
+import os
 from pathlib import Path
 from time import perf_counter
 
@@ -329,6 +329,7 @@ def integrate_particle(
 
     spectrum_measurement_position = np.array(
         (5 * laser_parameters.wavelength, 0.0, detector_parameters.z_distance)
+        # (0 * laser_parameters.wavelength, 0.0, detector_parameters.z_distance)
     )
 
     scattered_electric_field = jnp.zeros(
@@ -529,6 +530,8 @@ def simulate_trajectories(
     print("Integrating trajectory for all particles and computing scattered field")
 
     num_devices = len(jax.devices())
+    print(f"Mesh grid size: {num_devices}")
+
     mesh = jax.make_mesh((num_devices,), ("i",))
     with jax.set_mesh(mesh):
         initial_positions = jax.device_put(initial_positions, P("i", None))
@@ -556,18 +559,22 @@ def simulate_trajectories(
             detector_positions,
         )
 
-    final_positions = final_positions.block_until_ready()
-    final_momenta = final_momenta.block_until_ready()
-
     scattered_electric_field_spectrum = jnp.sum(
         scattered_electric_field_spectrum, axis=0
-    )
+    ).block_until_ready()
     scattered_magnetic_field_spectrum = jnp.sum(
         scattered_magnetic_field_spectrum, axis=0
-    )
+    ).block_until_ready()
 
-    detector_electric_field = jnp.sum(detector_electric_field, axis=0)
-    detector_magnetic_field = jnp.sum(detector_magnetic_field, axis=0)
+    detector_electric_field = jnp.sum(
+        detector_electric_field, axis=0
+    ).block_until_ready()
+    detector_magnetic_field = jnp.sum(
+        detector_magnetic_field, axis=0
+    ).block_until_ready()
+
+    final_positions = final_positions.block_until_ready()
+    final_momenta = final_momenta.block_until_ready()
 
     return IntegrationResult(
         np.arange(start_time, end_time + time_step / 2, time_step),
@@ -597,12 +604,17 @@ def compute_angular_momentum(
 
 
 def main() -> None:
+    # BUG: disable NVLink-related stuff; it gives error on our system
+    os.environ["NCCL_NVLS_ENABLE"] = "0"
+    # Disable memory pre-allocation, since it's a shared system
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
     print("Enabling float64 support in JAX")
     jax.config.update("jax_enable_x64", True)
 
-    print("Enabling CPU parallelism in JAX")
-    num_cpus = multiprocessing.cpu_count()
-    jax.config.update("jax_num_cpu_devices", min(128, num_cpus))
+    # print("Enabling CPU parallelism in JAX")
+    # num_cpus = multiprocessing.cpu_count()
+    # jax.config.update("jax_num_cpu_devices", min(128, num_cpus))
 
     # print("Available JAX devices:", jax.local_devices())
 
@@ -642,7 +654,7 @@ def main() -> None:
 
     seed = 42
     generator = np.random.default_rng(seed)
-    num_electrons = 1024
+    num_electrons = 16384
 
     print(f"Working with {num_electrons} electrons")
 
