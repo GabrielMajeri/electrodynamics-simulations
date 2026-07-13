@@ -2,12 +2,10 @@ from typing import cast
 
 import numpy as np
 
-from .typing import ComplexArray, RealArray
-
 
 def compute_angular_momentum_derivative(
-    detector_positions: RealArray, electric_field: ComplexArray, omega: float
-) -> ComplexArray:
+    detector_positions: np.ndarray, electric_field: np.ndarray, omega: float
+) -> np.ndarray:
     assert detector_positions.ndim == 3, (
         "Detector position should be a 2D array of 3D vectors"
     )
@@ -26,7 +24,7 @@ def compute_angular_momentum_derivative(
     dy: float = (detector_positions[0, 1, 1] - detector_positions[0, 0, 1]).item()
 
     electric_field_dx, electric_field_dy = cast(
-        tuple[ComplexArray, ComplexArray],
+        tuple[np.ndarray, np.ndarray],
         np.gradient(electric_field[:, :, :], dx, dy, axis=(0, 1)),
     )
 

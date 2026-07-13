@@ -20,6 +20,52 @@ def plot_particle_positions(fig: Figure, positions: np.ndarray) -> None:
     ax.grid()
 
 
+def plot_final_momentum_distribution(
+    fig: Figure,
+    initial_positions: np.ndarray,
+    waist_radius: float,
+    momenta: np.ndarray,
+    with_title: bool = True,
+) -> None:
+    print("Plotting z-momentum distribution for electrons")
+
+    ax = fig.add_subplot()
+
+    if with_title:
+        ax.set_title("Normalized $z$ momentum distribution")
+
+    momenta = momenta / np.abs(momenta).max()
+
+    momenta = np.ma.masked_where(np.abs(momenta) < 1e-2, momenta)
+
+    initial_positions = np.ma.masked_array(
+        initial_positions,
+        mask=np.repeat(np.ma.getmaskarray(momenta).reshape(-1, 1), 3, axis=1),
+    )
+
+    momenta = np.ma.compress_nd(momenta, axis=0)
+    initial_positions = np.ma.compress_nd(initial_positions, axis=0)
+
+    p = ax.scatter(
+        initial_positions[:, 0] / waist_radius,
+        initial_positions[:, 1] / waist_radius,
+        c=momenta,
+        cmap="bwr",
+        s=3,
+    )
+
+    fig.colorbar(p)
+
+    ax.set_xlabel("$x/w_0$")
+    ax.set_ylabel("$y/w_0$")
+
+    ax.set_aspect(1)
+
+    ax.grid()
+
+    fig.tight_layout()
+
+
 def plot_angular_momentum_distribution(
     fig: Figure,
     initial_positions: np.ndarray,
@@ -34,7 +80,7 @@ def plot_angular_momentum_distribution(
     if with_title:
         ax.set_title("Normalized angular momentum distribution")
 
-    momenta = momenta / momenta.max()
+    momenta = momenta / np.abs(momenta).max()
 
     momenta = np.ma.masked_where(np.abs(momenta) < 1e-2, momenta)
     initial_positions = np.ma.masked_array(

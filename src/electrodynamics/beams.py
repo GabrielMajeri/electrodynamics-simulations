@@ -1,24 +1,17 @@
 from math import pi
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
 import jax_dataclasses as jdc
 
-from electrodynamics.constants import SPEED_OF_LIGHT as c
+from .constants import SPEED_OF_LIGHT as c
+from .polarization import Polarization
 
 
-@jdc.pytree_dataclass
-class Polarization:
-    x: complex
-    y: complex
-
-    def __init__(self, x: jdc.Static[complex], y: jdc.Static[complex]) -> None:
-        norm = abs(x) + abs(y)
-        if not jnp.isclose(norm, 1):
-            raise ValueError("Polarization should have unit norm")
-
-        object.__setattr__(self, "x", x)
-        object.__setattr__(self, "y", y)
+class EMField(NamedTuple):
+    electric_field: jax.Array
+    magnetic_field: jax.Array
 
 
 @jdc.pytree_dataclass
@@ -136,7 +129,7 @@ def compute_gaussian_beam_fields(
 @jdc.jit
 def compute_laguerre_gauss_beam_fields(
     parameters: jdc.Static[LaguerreGaussBeamParameters], position: jax.Array
-) -> tuple[jax.Array, jax.Array]:
+) -> EMField:
     assert position.shape[-1] == 4, "Positions must be 4-vectors"
 
     tc, x, y, z = position.T
@@ -203,7 +196,7 @@ def compute_laguerre_gauss_beam_fields(
 
     B = jnp.vstack((jnp.real(B_x), jnp.real(B_y), jnp.real(B_z))).T
 
-    return E, B
+    return EMField(electric_field=E, magnetic_field=B)
 
 
 @jdc.jit
