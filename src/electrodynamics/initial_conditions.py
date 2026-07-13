@@ -1,11 +1,9 @@
 import numpy as np
 
-from .typing import RealArray
-
 
 def generate_initial_positions_on_disk(
     generator: np.random.Generator, disk_radius: float, num_particles: int
-) -> RealArray:
+) -> np.ndarray:
     """Generates uniformly distributed points within a disk of given radius,
     centered in the origin.
 

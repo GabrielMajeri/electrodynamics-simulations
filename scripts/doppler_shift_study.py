@@ -11,65 +11,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import typer
 
+from electrodynamics.beams import (
+    LaguerreGaussBeamParameters,
+    Polarization,
+    compute_laguerre_gauss_beam_fields,
+)
 from electrodynamics.constants import SPEED_OF_LIGHT
 from electrodynamics.initial_conditions import generate_initial_positions_on_disk
 from electrodynamics.plotting import plot_angular_momentum_distribution
 
 c = SPEED_OF_LIGHT
-
-
-@jdc.pytree_dataclass
-class Polarization:
-    x: complex
-    y: complex
-
-    def __init__(self, x: jdc.Static[complex], y: jdc.Static[complex]) -> None:
-        norm = abs(x) + abs(y)
-        if abs(norm - 1) > 1e-10:
-            raise Exception("Polarization should have unit norm")
-
-        object.__setattr__(self, "x", x)
-        object.__setattr__(self, "y", y)
-
-
-@jdc.pytree_dataclass
-class LaserParameters:
-    frequency: float
-    wavelength: float
-    amplitude: float
-    polarization: Polarization
-
-
-@jdc.jit
-def plane_wave_fields(
-    parameters: jdc.Static[LaserParameters], position: jax.Array
-) -> tuple[jax.Array, jax.Array]:
-    tc, _, _, z = position.T
-    t = tc / c
-
-    # k
-    wavenumber = (2 * pi) / parameters.wavelength
-
-    magnitude = parameters.amplitude
-    phase = jnp.exp(1j * (parameters.frequency * t - wavenumber * z))
-
-    phasor = magnitude * phase
-
-    polarization = parameters.polarization
-
-    E_x = jnp.real(polarization.x * phasor)
-    E_y = jnp.real(polarization.y * phasor)
-    E_z = jnp.zeros_like(E_x)
-
-    E = jnp.vstack((E_x, E_y, E_z)).T
-
-    B_x = -E_y / c
-    B_y = E_x / c
-    B_z = jnp.zeros_like(B_x)
-
-    B = jnp.vstack((B_x, B_y, B_z)).T
-
-    return E, B
 
 
 @jdc.jit
@@ -112,7 +63,7 @@ def compute_intermediate_acceleration(
     time: float,
     position: jax.Array,
     momentum: jax.Array,
-    laser_parameters: jdc.Static[LaserParameters],
+    laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseParameters],
 ) -> jax.Array:
     _, _, _, z = position.T
@@ -120,7 +71,10 @@ def compute_intermediate_acceleration(
     modulation = cutoff(time - z / c, pulse_parameters.phi_0, pulse_parameters.tau_0)
     modulation = jnp.expand_dims(modulation, axis=-1)
 
-    electric_field, magnetic_field = plane_wave_fields(laser_parameters, position)
+    # electric_field, magnetic_field = compute_plane_wave_fields(laser_parameters, position)
+    electric_field, magnetic_field = compute_laguerre_gauss_beam_fields(
+        laser_parameters, position
+    )
 
     electric_field = modulation * electric_field
     magnetic_field = modulation * magnetic_field
@@ -135,7 +89,7 @@ def compute_new_momentum(
     previous_position: jax.Array,
     previous_momentum: jax.Array,
     time_step: jdc.Static[float],
-    laser_parameters: jdc.Static[LaserParameters],
+    laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseParameters],
 ) -> jax.Array:
     tc, _, _, _ = previous_position.T
@@ -280,7 +234,7 @@ def compute_particle_trajectory(
     start_time: jdc.Static[float],
     end_time: jdc.Static[float],
     time_step: jdc.Static[float],
-    laser_parameters: jdc.Static[LaserParameters],
+    laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseParameters],
 ) -> tuple[jax.Array, jax.Array]:
     previous_position = initial_position
@@ -319,7 +273,7 @@ def integrate_particle(
     central_frequency: jdc.Static[float],
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
-    laser_parameters: jdc.Static[LaserParameters],
+    laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseParameters],
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     previous_position = initial_position
@@ -404,7 +358,7 @@ def simulate_trajectories(
     start_time: jdc.Static[float],
     end_time: jdc.Static[float],
     time_step: jdc.Static[float],
-    laser_parameters: jdc.Static[LaserParameters],
+    laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseParameters],
     central_frequency: jdc.Static[float],
     frequency_width: jdc.Static[float],
@@ -502,18 +456,26 @@ def main() -> None:
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarization(1.0, 0.0)
 
-    laser_parameters = LaserParameters(
-        laser_frequency, laser_wavelength, amplitude, polarization
+    waist_radius = 75 * laser_wavelength
+
+    radial_index = 2
+    azimuthal_index = -2
+
+    laser_parameters = LaguerreGaussBeamParameters(
+        laser_frequency,
+        laser_wavelength,
+        amplitude,
+        polarization,
+        waist_radius,
+        radial_index,
+        azimuthal_index,
     )
 
     seed = 42
     generator = np.random.default_rng(seed)
-    num_electrons = 1024
+    num_electrons = 16384
 
     print(f"Working with {num_electrons} electrons")
-
-    radial_index = 0
-    waist_radius = 75 * laser_parameters.wavelength
 
     disk_radius = (1.75 + radial_index) * waist_radius
 
@@ -580,39 +542,14 @@ def main() -> None:
     plots_directory = Path("plots")
     plots_directory.mkdir(parents=True, exist_ok=True)
 
-    fig, ax = plt.subplots()
+    plot_sample_electron_trajectory(
+        plots_directory,
+        result.timestamps,
+        np.asarray(result.electron_positions),
+        np.asarray(result.electron_momenta),
+    )
 
-    positions = result.electron_positions
-
-    # ax.plot(result.timestamps, positions[:, 0] - positions[:, 0].mean(), label="ct")
-    ax.plot(result.timestamps, positions[:, 1] - positions[:, 1].mean(), label="x")
-    ax.plot(result.timestamps, positions[:, 2] - positions[:, 2].mean(), label="y")
-    ax.plot(result.timestamps, positions[:, 3] - positions[:, 3].mean(), label="z")
-
-    ax.legend()
-    ax.grid()
-
-    fig.tight_layout()
-    fig.savefig(plots_directory / "trajectory_positions.pdf")
-
-    fig, ax = plt.subplots()
-
-    momenta = result.electron_momenta
-
-    gamma_ax = ax.twinx()
-    gamma_ax.plot(result.timestamps, momenta[:, 0] / c, label="$\\gamma$", color="cyan")
-
-    ax.plot(result.timestamps, momenta[:, 1], label="$u_1$")
-    ax.plot(result.timestamps, momenta[:, 2], label="$u_2$")
-    ax.plot(result.timestamps, momenta[:, 3], label="$u_3$")
-
-    ax.legend()
-    ax.grid()
-
-    fig.tight_layout()
-    fig.savefig(plots_directory / "trajectory_momenta.pdf")
-
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(dpi=200)
 
     colors = result.final_momenta[:, 3]
 
@@ -623,12 +560,17 @@ def main() -> None:
         c=colors,
     )
 
+    ax.set_xlabel("$x/w_0$")
+    ax.set_ylabel("$y/w_0$")
+
+    ax.grid()
+
     fig.colorbar(points)
 
     fig.tight_layout()
     fig.savefig(plots_directory / "final_momenta.png")
 
-    fig = plt.figure()
+    fig = plt.figure(dpi=200)
 
     angular_momenta = compute_angular_momentum(
         result.final_positions, result.final_momenta, m_e
@@ -663,6 +605,41 @@ def main() -> None:
 
     fig.tight_layout()
     fig.savefig(plots_directory / "electric_field_spectrum.pdf")
+
+
+def plot_sample_electron_trajectory(
+    plots_directory: Path,
+    timestamps: np.ndarray,
+    positions: np.ndarray,
+    momenta: np.ndarray,
+) -> None:
+    fig, ax = plt.subplots()
+
+    # ax.plot(result.timestamps, positions[:, 0] - positions[:, 0].mean(), label="ct")
+    ax.plot(timestamps, positions[:, 1] - positions[:, 1].mean(), label="x")
+    ax.plot(timestamps, positions[:, 2] - positions[:, 2].mean(), label="y")
+    ax.plot(timestamps, positions[:, 3] - positions[:, 3].mean(), label="z")
+
+    ax.legend()
+    ax.grid()
+
+    fig.tight_layout()
+    fig.savefig(plots_directory / "trajectory_positions.pdf")
+
+    fig, ax = plt.subplots()
+
+    gamma_ax = ax.twinx()
+    gamma_ax.plot(timestamps, momenta[:, 0] / c, label="$\\gamma$", color="cyan")
+
+    ax.plot(timestamps, momenta[:, 1], label="$u_1$")
+    ax.plot(timestamps, momenta[:, 2], label="$u_2$")
+    ax.plot(timestamps, momenta[:, 3], label="$u_3$")
+
+    ax.legend()
+    ax.grid()
+
+    fig.tight_layout()
+    fig.savefig(plots_directory / "trajectory_momenta.pdf")
 
 
 if __name__ == "__main__":

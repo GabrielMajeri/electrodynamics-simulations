@@ -1,10 +1,8 @@
 import numpy as np
 from matplotlib.figure import Figure
 
-from .typing import RealArray
 
-
-def plot_particle_positions(fig: Figure, positions: RealArray) -> None:
+def plot_particle_positions(fig: Figure, positions: np.ndarray) -> None:
     ax = fig.add_subplot(1, 2, 1, projection="3d")
 
     ax.set_xlabel("$x$")
@@ -24,9 +22,9 @@ def plot_particle_positions(fig: Figure, positions: RealArray) -> None:
 
 def plot_angular_momentum_distribution(
     fig: Figure,
-    initial_positions: RealArray,
+    initial_positions: np.ndarray,
     waist_radius: float,
-    momenta: RealArray,
+    momenta: np.ndarray,
     with_title: bool = True,
 ) -> None:
     print("Plotting angular momentum distribution of initial conditions")
