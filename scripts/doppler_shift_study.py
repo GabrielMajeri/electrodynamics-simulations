@@ -1,5 +1,4 @@
 from math import pi
-import os
 from pathlib import Path
 from time import perf_counter
 
@@ -11,273 +10,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 import typer
 
-from electrodynamics.beams import (
-    LaguerreGaussBeamParameters,
-    compute_laguerre_gauss_beam_fields,
-)
-from electrodynamics.constants import SPEED_OF_LIGHT
+from electrodynamics.beams import LaguerreGaussBeamParameters
+from electrodynamics.constants import ELECTRON_CHARGE, ELECTRON_MASS, SPEED_OF_LIGHT
 from electrodynamics.detector import DetectorParameters, initialize_detector_positions
-from electrodynamics.initial_conditions import generate_initial_positions_on_disk
+from electrodynamics.fields import compute_scattered_electric_and_magnetic_fields
+from electrodynamics.initial_conditions import (
+    generate_initial_particle_momenta_moving_towards_laser,
+    generate_initial_positions_on_disk,
+)
+from electrodynamics.integrate import compute_next_momentum_rk4
+from electrodynamics.jax import initialize_jax
 from electrodynamics.plotting import (
     plot_angular_momentum_distribution,
     plot_final_momentum_distribution,
 )
 from electrodynamics.polarization import Polarizations
+from electrodynamics.pulse import PulseWithFlatPeakParameters
 
 c = SPEED_OF_LIGHT
+m_e = ELECTRON_MASS
+q = ELECTRON_CHARGE
 
-
-@jdc.jit
-def gaussian_envelope(
-    phi: jax.Array, phi_0: jdc.Static[float], tau_0: jdc.Static[float]
-) -> jax.Array:
-    t = (phi - phi_0) / tau_0
-    return jnp.exp(-(t * t))
-
-
-@jdc.pytree_dataclass
-class GaussianPulseParameters:
-    phi_0: float
-    tau_0: float
-
-
-@jdc.jit
-def compute_acceleration(
-    momentum: jax.Array,
-    electric_field: jax.Array,
-    magnetic_field: jax.Array,
-    charge_to_mass_ratio: jdc.Static[float],
-) -> jax.Array:
-    "Computes the acceleration felt by a charged particle in an electric field."
-
-    u0, u1, u2, u3 = momentum.T
-    E_x, E_y, E_z = electric_field.T
-    B_x, B_y, B_z = magnetic_field.T
-
-    du0 = u1 * E_x / c + u2 * E_y / c + u3 * E_z / c
-    du1 = u0 * E_x / c + u2 * B_z - u3 * B_y
-    du2 = u0 * E_y / c - u1 * B_z + u3 * B_x
-    du3 = u0 * E_z / c + u1 * B_y - u2 * B_x
-
-    return charge_to_mass_ratio * jnp.array((du0, du1, du2, du3)).T
-
-
-@jdc.jit
-def compute_intermediate_acceleration(
-    time: float,
-    position: jax.Array,
-    momentum: jax.Array,
-    laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[GaussianPulseParameters],
-) -> jax.Array:
-    _, _, _, z = position.T
-
-    modulation = gaussian_envelope(
-        time - z / c, pulse_parameters.phi_0, pulse_parameters.tau_0
-    )
-    modulation = jnp.expand_dims(modulation, axis=-1)
-
-    # electric_field, magnetic_field = compute_plane_wave_fields(
-    #     laser_parameters, position
-    # )
-    electric_field, magnetic_field = compute_laguerre_gauss_beam_fields(
-        laser_parameters, position
-    )
-
-    electric_field = modulation * electric_field
-    magnetic_field = modulation * magnetic_field
-
-    return compute_acceleration(
-        momentum, electric_field, magnetic_field, charge_to_mass_ratio=-1
-    )
-
-
-@jdc.jit
-def compute_new_momentum(
-    previous_position: jax.Array,
-    previous_momentum: jax.Array,
-    time_step: float,
-    laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[GaussianPulseParameters],
-) -> jax.Array:
-    tc, _, _, _ = previous_position.T
-    laboratory_time = tc / c
-
-    # Euler
-    # electric_field, magnetic_field = plane_wave_fields(
-    #     laser_parameters, previous_position
-    # )
-    # acceleration = compute_acceleration(
-    #     previous_momentum,
-    #     electric_field,
-    #     magnetic_field,
-    #     charge_to_mass_ratio=-1,
-    # )
-
-    # Runge-Kutta 4th order
-    k_1 = compute_intermediate_acceleration(
-        laboratory_time,
-        previous_position,
-        previous_momentum,
-        laser_parameters,
-        pulse_parameters,
-    )
-
-    k_2 = compute_intermediate_acceleration(
-        laboratory_time + time_step / 2,
-        previous_position,
-        previous_momentum + time_step / 2 * k_1,
-        laser_parameters,
-        pulse_parameters,
-    )
-
-    k_3 = compute_intermediate_acceleration(
-        laboratory_time + time_step / 2,
-        previous_position,
-        previous_momentum + time_step / 2 * k_2,
-        laser_parameters,
-        pulse_parameters,
-    )
-
-    k_4 = compute_intermediate_acceleration(
-        laboratory_time + time_step,
-        previous_position,
-        previous_momentum + time_step * k_3,
-        laser_parameters,
-        pulse_parameters,
-    )
-
-    acceleration = (k_1 + 2 * k_2 + 2 * k_3 + k_4) / 6
-
-    # TODO: implement sanity checks
-    # if (check_for_errors)
-    # {
-    #     check_integration_results(previous_momentum, acceleration);
-    # }
-
-    return previous_momentum + time_step * acceleration
-
-
-def compute_scattered_fields(
-    current_time: float,
-    frequency: float | np.ndarray,
-    position: jax.Array,
-    momentum: jax.Array,
-    initial_position: jax.Array,
-    detector_position: np.ndarray | jax.Array,
-) -> tuple[jax.Array, jax.Array]:
-    """Computes the scattered electric/magnetic field from a moving charge,
-    using the formulas for the Liénard-Wiechert potentials.
-    """
-    particle_position = position[:, 1:4]
-    particle_velocity = momentum[:, 1:4]
-    initial_position = initial_position[:, 1:4]
-
-    # r_0(t) = r(t) - R_0
-    particle_displacement = particle_position - initial_position
-
-    # x_0(t) = x - R_0
-    detector_displacement = detector_position - initial_position
-
-    # R(x_0, t) = x_0 - r_0(t) = (x - R_0) - (r(t) - R_0) = x - r(t)
-    displacement = detector_displacement - particle_displacement
-    displacement_norm = jnp.expand_dims(
-        jnp.linalg.vector_norm(displacement, axis=-1), axis=-1
-    )
-
-    # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
-    view_direction = displacement / displacement_norm
-
-    # exp(i * omega * (t + R(x_0, t)/c))
-    oscillatory_kernel = jnp.exp(
-        1j * frequency * (current_time + displacement_norm / c)
-    )
-
-    # \beta = v/c
-    beta = particle_velocity / c
-
-    # ===== Electric field terms =====
-    # Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))
-    electric_field_common_term = jnp.cross(
-        view_direction, jnp.cross(view_direction, beta)
-    )
-
-    # O(1/|R|) term
-    # - ((i * omega) / c) * (common term) / |R(x_0, t)|
-    electric_field_first_term = -((1j * frequency) / c) * (
-        electric_field_common_term / displacement_norm
-    )
-
-    displacement_norm_squared = displacement_norm * displacement_norm
-
-    # O(1/|R|^2) term
-    # [(common term) + n(x_0, t) * (1 + dot(n(x_0, t), \beta(t)))] / |R(x_0, t)|^2
-    electric_field_second_term = (
-        electric_field_common_term
-        + view_direction
-        * jnp.expand_dims(1 + jnp.linalg.vecdot(view_direction, beta), axis=-1)
-    ) / displacement_norm_squared
-
-    n_cross_beta = jnp.cross(view_direction, beta)
-
-    # ===== Magnetic field terms =====
-    # O(1/|R|) term
-    magnetic_field_first_term = ((1j * frequency) / c) * (
-        n_cross_beta / displacement_norm
-    )
-
-    # O(1/|R|^2) term
-    magnetic_field_second_term = n_cross_beta / displacement_norm_squared
-
-    # Add up the components
-    electric_field = oscillatory_kernel * (
-        electric_field_first_term + electric_field_second_term
-    )
-    magnetic_field = oscillatory_kernel * (
-        magnetic_field_first_term + magnetic_field_second_term
-    )
-
-    return electric_field, magnetic_field
-
-
-@jdc.jit
-def compute_particle_trajectory(
-    initial_position: jax.Array,
-    initial_momentum: jax.Array,
-    start_time: jdc.Static[float],
-    end_time: jdc.Static[float],
-    time_step: jdc.Static[float],
-    laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[GaussianPulseParameters],
-) -> tuple[jax.Array, jax.Array]:
-    "Compute the trajectory of a single particle under the action of the laser pulse."
-
-    num_time_steps = int((end_time - start_time) / time_step) + 1
-
-    def scan_fn(
-        u: tuple[jax.Array, jax.Array], _: None
-    ) -> tuple[tuple[jax.Array, jax.Array], tuple[jax.Array, jax.Array]]:
-        previous_position, previous_momentum = u
-
-        new_momentum = compute_new_momentum(
-            previous_position,
-            previous_momentum,
-            time_step,
-            laser_parameters,
-            pulse_parameters,
-        )
-        new_position = previous_position + time_step * new_momentum
-
-        u_next = (jnp.squeeze(new_position), jnp.squeeze(new_momentum))
-        return u_next, u_next
-
-    _, trajectory = jax.lax.scan(
-        scan_fn, (initial_position, initial_momentum), None, length=num_time_steps
-    )
-
-    positions, momenta = trajectory
-    return positions, momenta
-
+type PulseParameters = PulseWithFlatPeakParameters
 
 type IterationState = tuple[
     float, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array
@@ -295,7 +49,7 @@ def integrate_particles(
     end_time: jdc.Static[float],
     time_step: jdc.Static[float],
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[GaussianPulseParameters],
+    pulse_parameters: jdc.Static[PulseParameters],
     central_frequency: jdc.Static[float],
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
@@ -306,14 +60,18 @@ def integrate_particles(
     under the action of the laser pulse.
     """
 
-    frequencies = np.linspace(
+    frequencies = jnp.linspace(
         central_frequency - frequency_width / 2,
         central_frequency + frequency_width / 2,
         num_frequencies,
     )
 
-    spectrum_measurement_position = np.array(
-        (5 * laser_parameters.wavelength, 0.0, detector_parameters.z_distance)
+    spectrum_measurement_position = jnp.array(
+        (
+            480 * laser_parameters.wavelength,
+            0 * laser_parameters.wavelength,
+            detector_parameters.z_distance,
+        )
         # (0 * laser_parameters.wavelength, 0.0, detector_parameters.z_distance)
     )
 
@@ -346,13 +104,13 @@ def integrate_particles(
     detector_magnetic_field = jax.lax.pcast(detector_magnetic_field, "i", to="varying")
 
     compute_scattered_fields_for_all_frequencies = jax.vmap(
-        compute_scattered_fields,
+        compute_scattered_electric_and_magnetic_fields,
         in_axes=(None, 0, None, None, None, None),
         out_axes=1,
     )
 
     compute_scattered_fields_for_all_detector_positions = jax.vmap(
-        compute_scattered_fields,
+        compute_scattered_electric_and_magnetic_fields,
         in_axes=(None, None, None, None, None, 0),
         out_axes=1,
     )
@@ -370,7 +128,7 @@ def integrate_particles(
             previous_detector_magnetic_field,
         ) = u
 
-        new_momenta = compute_new_momentum(
+        new_momenta = compute_next_momentum_rk4(
             previous_positions,
             previous_momenta,
             time_step,
@@ -463,9 +221,6 @@ class IntegrationResult:
     timestamps: np.ndarray
     frequencies: np.ndarray
 
-    electron_positions: jax.Array
-    electron_momenta: jax.Array
-
     final_positions: jax.Array
     final_momenta: jax.Array
 
@@ -483,37 +238,22 @@ def simulate_trajectories(
     end_time: jdc.Static[float],
     time_step: jdc.Static[float],
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
-    pulse_parameters: jdc.Static[GaussianPulseParameters],
+    pulse_parameters: jdc.Static[PulseParameters],
     central_frequency: jdc.Static[float],
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
     detector_parameters: jdc.Static[DetectorParameters],
     detector_positions: jdc.Static[jax.Array],
 ) -> IntegrationResult:
-    print("Integrating trajectory for sample particle")
-
-    electron_positions, electron_momenta = compute_particle_trajectory(
-        initial_positions[0],
-        initial_momenta[0],
-        start_time,
-        end_time,
-        time_step,
-        laser_parameters,
-        pulse_parameters,
-    )
-
-    electron_positions = electron_positions.block_until_ready()
-    electron_momenta = electron_momenta.block_until_ready()
-
     print("Integrating trajectory for all particles and computing scattered field")
 
-    num_devices = len(jax.devices())
+    num_devices = min(len(initial_positions), len(jax.devices()))
     # print(f"Mesh grid size: {num_devices}")
 
     mesh = jax.make_mesh((num_devices,), ("i",))
     with jax.set_mesh(mesh):
         batch_size = 1024
-        num_batches = len(initial_positions) // batch_size
+        num_batches = max(1, len(initial_positions) // batch_size)
 
         batches = zip(
             jnp.split(initial_positions, num_batches, axis=0),
@@ -573,14 +313,12 @@ def simulate_trajectories(
         final_momenta = jnp.concatenate(final_momenta)
 
     return IntegrationResult(
-        np.arange(start_time, end_time + time_step / 2, time_step),
+        np.arange(start_time, end_time + 1e-10, time_step),
         np.linspace(
             central_frequency - frequency_width / 2,
             central_frequency + frequency_width / 2,
             num_frequencies,
         ),
-        electron_positions,
-        electron_momenta,
         final_positions,
         final_momenta,
         scattered_electric_field_spectrum,
@@ -600,27 +338,11 @@ def compute_angular_momentum(
 
 
 def main() -> None:
-    # BUG: disable NVLink-related stuff; it gives error on our system
-    os.environ["NCCL_NVLS_ENABLE"] = "0"
-    # Disable memory pre-allocation, since it's a shared system
-    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+    """Simulates a Laguerre-Gauss laser pulse hitting a bunch of electrons moving at relativistic speeds.
+    The scattered radiation, as measuerd on a simulated detector, is Doppler-shifted to much higher frequencies.
+    """
 
-    print("Enabling float64 support in JAX")
-    jax.config.update("jax_enable_x64", True)
-
-    # print("Enabling CPU parallelism in JAX")
-    # num_cpus = multiprocessing.cpu_count()
-    # jax.config.update("jax_num_cpu_devices", min(128, num_cpus))
-
-    # print("Available JAX devices:", jax.local_devices())
-
-    jax.config.update("jax_compilation_cache_dir", "jax_cache")
-    jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
-    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-    jax.config.update(
-        "jax_persistent_cache_enable_xla_caches",
-        "xla_gpu_per_fusion_autotune_cache_dir",
-    )
+    initialize_jax()
 
     # Monochromatic laser
     laser_frequency = 0.057
@@ -628,8 +350,6 @@ def main() -> None:
     laser_wavelength = (2 * pi * c) / laser_frequency
 
     a_0 = 1
-    m_e = 1
-    q = -1
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarizations.RIGHT_CIRCULAR.value
@@ -650,7 +370,7 @@ def main() -> None:
 
     seed = 42
     generator = np.random.default_rng(seed)
-    num_electrons = 16384
+    num_electrons = 4096
 
     print(f"Working with {num_electrons} electrons")
 
@@ -664,13 +384,15 @@ def main() -> None:
         (np.zeros((num_electrons, 1), dtype=np.float64), initial_positions), axis=-1
     )
 
+    # Relativistic factor
+    gamma: float = 1
+
     # TODO: give the electrons initial velocities and check what is
     # the Doppler-shifted frequency of the scattered radiation (should be ~ 4 \gamma^2)
 
-    initial_momenta = np.zeros((num_electrons, 4), dtype=np.float64)
-    # u0 = c \gamma
-    # We set \gamma to be 1 initially
-    initial_momenta[:, 0] = c
+    initial_momenta = generate_initial_particle_momenta_moving_towards_laser(
+        num_particles=num_electrons, gamma=gamma, particle_mass=m_e
+    )
 
     initial_positions = jnp.asarray(initial_positions)
     initial_momenta = jnp.asarray(initial_momenta)
@@ -678,29 +400,30 @@ def main() -> None:
     ### Pulse parameters ###
     tau_0 = 10 / laser_frequency
     phi_0 = 3 * tau_0
+    peak_duration_periods = 5
 
-    pulse_parameters = GaussianPulseParameters(phi_0, tau_0)
+    pulse_parameters = PulseWithFlatPeakParameters(phi_0, tau_0, peak_duration_periods)
 
     integration_start_time = 0.0
-    integration_end_time = 6 * tau_0
-    integration_duration = integration_end_time - integration_start_time
+    integration_end_time = (6 * tau_0 + peak_duration_periods * tau_0) / gamma
+    # integration_duration = integration_end_time - integration_start_time
 
-    time_step = integration_duration / 500
+    time_step = ((2 * pi) / laser_frequency) / 100 / gamma
 
     print(
         f"Integrating from t = {integration_start_time} to t = {integration_end_time}, with a time step of dt = {time_step}"
     )
 
-    central_frequency = laser_parameters.frequency
-    frequency_width = 0.25 * central_frequency
+    central_frequency = laser_parameters.frequency * (gamma**2)
+    frequency_width = 0.5 * central_frequency
     num_frequencies = 128
 
     detector_parameters = DetectorParameters(
         width=40 * 75 * laser_wavelength,
         height=40 * 75 * laser_wavelength,
         z_distance=-2 * 100_000 * laser_wavelength,
-        grid_size_x=128,
-        grid_size_y=128,
+        grid_size_x=64,
+        grid_size_y=64,
     )
 
     detector_positions = initialize_detector_positions(detector_parameters)
@@ -732,13 +455,6 @@ def main() -> None:
     plots_directory.mkdir(parents=True, exist_ok=True)
 
     ### Sample trajectory
-    plot_sample_electron_trajectory(
-        plots_directory,
-        result.timestamps,
-        np.asarray(result.electron_positions),
-        np.asarray(result.electron_momenta),
-    )
-
     ### Final z-momentum distribution
     fig = plt.figure(dpi=200)
 
@@ -776,6 +492,13 @@ def main() -> None:
     )
 
     ### Electric/magnetic fields on detector screen
+    detector_extent: tuple[float, float, float, float] = (
+        (-detector_parameters.width / 2) / laser_parameters.wavelength,
+        (+detector_parameters.width / 2) / laser_parameters.wavelength,
+        (-detector_parameters.height / 2) / laser_parameters.wavelength,
+        (+detector_parameters.height / 2) / laser_parameters.wavelength,
+    )
+
     detector_electric_field = result.detector_electric_field.reshape(
         detector_parameters.grid_size_y, detector_parameters.grid_size_x, -1
     )
@@ -787,10 +510,11 @@ def main() -> None:
 
         ax.set_title(f"$E_{coordinate}$")
 
-        image = ax.imshow(np.real(detector_electric_field[:, :, index]), cmap="bwr")
-        # plt.imshow(np.linalg.vector_norm(electric_field, axis=-1))
-        # plt.imshow(np.angle(electric_field[:, :, 0]))
-        # plt.legend()
+        image = ax.imshow(
+            np.real(detector_electric_field[:, :, index]),
+            cmap="bwr",
+            extent=detector_extent,
+        )
 
         ax.set_xlabel("Detector $x$")
         ax.set_ylabel("Detector $y$")
@@ -801,40 +525,26 @@ def main() -> None:
         fig.tight_layout()
         fig.savefig(plots_directory / f"electric_field_{coordinate}.pdf")
 
+    fig, ax = plt.subplots(figsize=(7, 6), dpi=200)
 
-def plot_sample_electron_trajectory(
-    plots_directory: Path,
-    timestamps: np.ndarray,
-    positions: np.ndarray,
-    momenta: np.ndarray,
-) -> None:
-    fig, ax = plt.subplots()
+    fig.suptitle("Scattered electric field on detector")
 
-    # ax.plot(result.timestamps, positions[:, 0] - positions[:, 0].mean(), label="ct")
-    ax.plot(timestamps, positions[:, 1] - positions[:, 1].mean(), label="x")
-    ax.plot(timestamps, positions[:, 2] - positions[:, 2].mean(), label="y")
-    ax.plot(timestamps, positions[:, 3] - positions[:, 3].mean(), label="z")
+    ax.set_title("$|E|$")
 
-    ax.legend()
+    image = ax.imshow(
+        np.linalg.vector_norm(detector_electric_field[:, :, :], axis=-1),
+        cmap="bwr",
+        extent=detector_extent,
+    )
+
+    ax.set_xlabel("Detector $x$")
+    ax.set_ylabel("Detector $y$")
     ax.grid()
 
-    fig.tight_layout()
-    fig.savefig(plots_directory / "trajectory_positions.pdf")
-
-    fig, ax = plt.subplots()
-
-    gamma_ax = ax.twinx()
-    gamma_ax.plot(timestamps, momenta[:, 0] / c, label="$\\gamma$", color="cyan")
-
-    ax.plot(timestamps, momenta[:, 1], label="$u_1$")
-    ax.plot(timestamps, momenta[:, 2], label="$u_2$")
-    ax.plot(timestamps, momenta[:, 3], label="$u_3$")
-
-    ax.legend()
-    ax.grid()
+    fig.colorbar(image)
 
     fig.tight_layout()
-    fig.savefig(plots_directory / "trajectory_momenta.pdf")
+    fig.savefig(plots_directory / "electric_field_norm.pdf")
 
 
 def plot_scattered_radiation_spectrum(
