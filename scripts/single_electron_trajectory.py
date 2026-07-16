@@ -33,8 +33,9 @@ class ParticleTrajectory:
     positions: jax.Array
     momenta: jax.Array
 
-    oscillatory_kernel_exponent: jax.Array
-    # electric_field_integrands: jax.Array
+    oscillatory_kernel_exponents: jax.Array
+    electric_field_multipliers: jax.Array
+    magnetic_field_multipliers: jax.Array
 
 
 @jdc.jit
@@ -62,16 +63,18 @@ def compute_particle_trajectory(
     )
 
     def scan_fn(
-        u: tuple[float, jax.Array, jax.Array, float], _: None
+        u: tuple[float, jax.Array, jax.Array, float, jax.Array, jax.Array], _: None
     ) -> tuple[
-        tuple[float, jax.Array, jax.Array, float],
-        tuple[float, jax.Array, jax.Array, float],
+        tuple[float, jax.Array, jax.Array, float, jax.Array, jax.Array],
+        tuple[float, jax.Array, jax.Array, float, jax.Array, jax.Array],
     ]:
         (
             proper_time,
             previous_position,
             previous_momentum,
             _previous_oscillatory_kernel_exponent,
+            _previous_electric_field_component,
+            _previous_magnetic_field_component,
         ) = u
 
         new_momentum = compute_next_momentum_rk4(
@@ -87,6 +90,7 @@ def compute_particle_trajectory(
         fourier_frequency = laser_parameters.frequency * (gamma**2)
 
         particle_position = new_position[0, 1:4]
+        particle_velocity = new_momentum[0, 1:4]
 
         # r_0(t) = r(t) - R_0
         particle_displacement = particle_position - initial_position[1:4]
@@ -103,11 +107,59 @@ def compute_particle_trajectory(
             proper_time + displacement_norm / c
         )
 
+        # \beta = v/c
+        beta = particle_velocity / c
+
+        # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
+        view_direction = displacement / displacement_norm
+
+        # ===== Electric field terms =====
+        # Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))
+        electric_field_common_term = jnp.cross(
+            view_direction, jnp.cross(view_direction, beta)
+        )
+
+        # O(1/|R|) term
+        # - ((i * omega) / c) * (common term) / |R(x_0, t)|
+        electric_field_first_term = -((1j * fourier_frequency) / c) * (
+            electric_field_common_term / displacement_norm
+        )
+
+        displacement_norm_squared = displacement_norm * displacement_norm
+
+        # O(1/|R|^2) term
+        # [(common term) + n(x_0, t) * (1 + dot(n(x_0, t), \beta(t)))] / |R(x_0, t)|^2
+        electric_field_second_term = (
+            electric_field_common_term
+            + view_direction
+            * jnp.expand_dims(1 + jnp.linalg.vecdot(view_direction, beta), axis=-1)
+        ) / displacement_norm_squared
+
+        n_cross_beta = jnp.cross(view_direction, beta)
+
+        # ===== Magnetic field terms =====
+        # O(1/|R|) term
+        magnetic_field_first_term = ((1j * fourier_frequency) / c) * (
+            n_cross_beta / displacement_norm
+        )
+
+        # O(1/|R|^2) term
+        magnetic_field_second_term = n_cross_beta / displacement_norm_squared
+
+        electric_field_multiplier = (
+            electric_field_first_term + electric_field_second_term
+        )
+        magnetic_field_multiplier = (
+            magnetic_field_first_term + magnetic_field_second_term
+        )
+
         u_next = (
             proper_time + time_step,
             jnp.squeeze(new_position),
             jnp.squeeze(new_momentum),
             oscillatory_kernel_exponent,
+            electric_field_multiplier,
+            magnetic_field_multiplier,
         )
         return u_next, u_next
 
@@ -118,17 +170,28 @@ def compute_particle_trajectory(
             initial_position,
             initial_momentum,
             0,
+            jnp.zeros(shape=3, dtype=jnp.complex128),
+            jnp.zeros(shape=3, dtype=jnp.complex128),
         ),
         None,
         length=num_time_steps,
     )
 
-    timestamps, positions, momenta, oscillatory_kernel_exponents = trajectory
+    (
+        timestamps,
+        positions,
+        momenta,
+        oscillatory_kernel_exponents,
+        electric_field_multipliers,
+        magnetic_field_multipliers,
+    ) = trajectory
     return ParticleTrajectory(
         jnp.asarray(timestamps),
         positions,
         momenta,
         jnp.asarray(oscillatory_kernel_exponents),
+        electric_field_multipliers,
+        magnetic_field_multipliers,
     )
 
 
@@ -231,12 +294,44 @@ def main() -> None:
 
     ax.set_title("$\\omega (t + R(x_0, t)/c)$")
 
-    ax.plot(trajectory.timestamps, trajectory.oscillatory_kernel_exponent)
+    ax.plot(trajectory.timestamps, trajectory.oscillatory_kernel_exponents)
 
     ax.grid()
 
     fig.tight_layout()
-    fig.savefig(plots_directory / "oscillatory_kernel_exponent.pdf")
+    fig.savefig(plots_directory / "oscillatory_kernel_exponents.pdf")
+
+    fig, ax = plt.subplots(dpi=200)
+
+    fig.suptitle("Multiplier in the electric field integral")
+
+    E_x, E_y, E_z = np.real(trajectory.electric_field_multipliers).T
+
+    ax.plot(trajectory.timestamps, E_x - np.mean(E_x), label="$E_x$")
+    ax.plot(trajectory.timestamps, E_y - np.mean(E_y), label="$E_y$")
+    ax.plot(trajectory.timestamps, E_z - np.mean(E_z), label="$E_z$")
+
+    ax.legend()
+    ax.grid()
+
+    fig.tight_layout()
+    fig.savefig(plots_directory / "electric_field_multipliers.pdf")
+
+    fig, ax = plt.subplots(dpi=200)
+
+    fig.suptitle("Multiplier in the magnetic field integral")
+
+    B_x, B_y, B_z = np.real(trajectory.magnetic_field_multipliers).T
+
+    ax.plot(trajectory.timestamps, B_x - np.mean(B_x), label="$B_x$")
+    ax.plot(trajectory.timestamps, B_y - np.mean(B_y), label="$B_y$")
+    ax.plot(trajectory.timestamps, B_z - np.mean(B_z), label="$B_z$")
+
+    ax.legend()
+    ax.grid()
+
+    fig.tight_layout()
+    fig.savefig(plots_directory / "magnetic_field_multipliers.pdf")
 
 
 def plot_electron_trajectory(
