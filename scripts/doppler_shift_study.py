@@ -39,7 +39,7 @@ type IterationState = tuple[
 
 
 @jax.shard_map(
-    in_specs=(P("i"),) * 2 + (None,) * 10,
+    in_specs=(P("i"),) * 2 + (None,) * 11,
     out_specs=(P("i"),) * 6,
 )
 def integrate_particles(
@@ -53,6 +53,7 @@ def integrate_particles(
     central_frequency: jdc.Static[float],
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
+    spectrum_measurement_position: jdc.Static[jax.Array],
     detector_parameters: jdc.Static[DetectorParameters],
     detector_positions: jdc.Static[jax.Array],
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -64,15 +65,6 @@ def integrate_particles(
         central_frequency - frequency_width / 2,
         central_frequency + frequency_width / 2,
         num_frequencies,
-    )
-
-    spectrum_measurement_position = jnp.array(
-        (
-            480 * laser_parameters.wavelength,
-            0 * laser_parameters.wavelength,
-            detector_parameters.z_distance,
-        )
-        # (0 * laser_parameters.wavelength, 0.0, detector_parameters.z_distance)
     )
 
     batch_size = len(initial_positions)
@@ -105,13 +97,13 @@ def integrate_particles(
 
     compute_scattered_fields_for_all_frequencies = jax.vmap(
         compute_scattered_electric_and_magnetic_fields,
-        in_axes=(None, 0, None, None, None, None),
+        in_axes=(0, None, None, None, None),
         out_axes=1,
     )
 
     compute_scattered_fields_for_all_detector_positions = jax.vmap(
         compute_scattered_electric_and_magnetic_fields,
-        in_axes=(None, None, None, None, None, 0),
+        in_axes=(None, None, None, None, 0),
         out_axes=1,
     )
 
@@ -138,7 +130,6 @@ def integrate_particles(
         new_position = previous_positions + time_step * new_momenta
 
         electric_field, magnetic_field = compute_scattered_fields_for_all_frequencies(
-            proper_time,
             frequencies,
             new_position,
             new_momenta,
@@ -154,7 +145,6 @@ def integrate_particles(
 
         electric_field, magnetic_field = (
             compute_scattered_fields_for_all_detector_positions(
-                proper_time,
                 central_frequency,
                 new_position,
                 new_momenta,
@@ -242,6 +232,7 @@ def simulate_trajectories(
     central_frequency: jdc.Static[float],
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
+    spectrum_measurement_position: jax.Array,
     detector_parameters: jdc.Static[DetectorParameters],
     detector_positions: jdc.Static[jax.Array],
 ) -> IntegrationResult:
@@ -290,6 +281,7 @@ def simulate_trajectories(
                 central_frequency,
                 frequency_width,
                 num_frequencies,
+                spectrum_measurement_position,
                 detector_parameters,
                 detector_positions,
             )
@@ -349,11 +341,11 @@ def main() -> None:
     # ~800 nm, red light
     laser_wavelength = (2 * pi * c) / laser_frequency
 
-    a_0 = 1
+    a_0 = 1e-2
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarizations.RIGHT_CIRCULAR.value
-    waist_radius = 75 * laser_wavelength
+    waist_radius = 25 * laser_wavelength
 
     radial_index = 2
     azimuthal_index = -2
@@ -385,7 +377,7 @@ def main() -> None:
     )
 
     # Relativistic factor
-    gamma: float = 1
+    gamma: float = 3
 
     # TODO: give the electrons initial velocities and check what is
     # the Doppler-shifted frequency of the scattered radiation (should be ~ 4 \gamma^2)
@@ -414,19 +406,33 @@ def main() -> None:
         f"Integrating from t = {integration_start_time} to t = {integration_end_time}, with a time step of dt = {time_step}"
     )
 
-    central_frequency = laser_parameters.frequency * (gamma**2)
+    doppler_shift_factor = (
+        (gamma + np.sqrt(gamma**2 - 1)) / (gamma - np.sqrt(gamma**2 - 1))
+    ).item()
+
+    central_frequency = laser_parameters.frequency * doppler_shift_factor
+    print(f"Looking around Fourier frequency omega = {central_frequency}")
+
     frequency_width = 0.5 * central_frequency
     num_frequencies = 128
 
     detector_parameters = DetectorParameters(
-        width=40 * 75 * laser_wavelength,
-        height=40 * 75 * laser_wavelength,
+        width=40 * 75 * laser_wavelength / 3,
+        height=40 * 75 * laser_wavelength / 3,
         z_distance=-2 * 100_000 * laser_wavelength,
         grid_size_x=64,
         grid_size_y=64,
     )
 
     detector_positions = initialize_detector_positions(detector_parameters)
+
+    spectrum_measurement_position = jnp.array(
+        (
+            25 * laser_parameters.wavelength,
+            -25 * laser_parameters.wavelength,
+            detector_parameters.z_distance,
+        )
+    )
 
     start_time = perf_counter()
 
@@ -441,6 +447,7 @@ def main() -> None:
         central_frequency,
         frequency_width,
         num_frequencies,
+        spectrum_measurement_position,
         detector_parameters,
         detector_positions,
     )
@@ -514,6 +521,14 @@ def main() -> None:
             np.real(detector_electric_field[:, :, index]),
             cmap="bwr",
             extent=detector_extent,
+        )
+
+        ax.scatter(
+            spectrum_measurement_position[0] / laser_parameters.wavelength,
+            spectrum_measurement_position[1] / laser_parameters.wavelength,
+            marker="x",
+            c="green",
+            s=50,
         )
 
         ax.set_xlabel("Detector $x$")

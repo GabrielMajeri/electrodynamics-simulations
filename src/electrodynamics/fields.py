@@ -30,7 +30,6 @@ def compute_acceleration_of_charged_particle_in_em_field(
 
 @jdc.jit
 def compute_scattered_electric_and_magnetic_fields(
-    current_time: float,
     frequency: float | jax.Array,
     position: jax.Array,
     momentum: jax.Array,
@@ -40,6 +39,7 @@ def compute_scattered_electric_and_magnetic_fields(
     """Computes the scattered electric/magnetic field from a moving charge,
     using the formulas for the Liénard-Wiechert potentials.
     """
+    laboratory_time = jnp.expand_dims(position[:, 0], axis=-1) / c
     particle_position = position[:, 1:4]
     particle_velocity = momentum[:, 1:4]
     initial_position = initial_position[:, 1:4]
@@ -61,7 +61,7 @@ def compute_scattered_electric_and_magnetic_fields(
 
     # exp(i * omega * (t + R(x_0, t)/c))
     oscillatory_kernel = jnp.exp(
-        1j * frequency * (current_time + displacement_norm / c)
+        1j * frequency * (laboratory_time + displacement_norm / c)
     )
 
     # \beta = v/c

@@ -47,20 +47,12 @@ def compute_particle_trajectory(
     time_step: jdc.Static[float],
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
-    detector_z_distance: jdc.Static[float],
+    central_frequency: jdc.Static[float],
+    spectrum_measurement_position: jax.Array,
 ) -> ParticleTrajectory:
     "Compute the trajectory of a single particle under the action of the laser pulse."
 
     num_time_steps = int((end_time - start_time) / time_step) + 1
-
-    spectrum_measurement_position = jnp.array(
-        (
-            480 * laser_parameters.wavelength,
-            0 * laser_parameters.wavelength,
-            detector_z_distance,
-        )
-        # (0 * laser_parameters.wavelength, 0.0, detector_z_distance)
-    )
 
     def scan_fn(
         u: tuple[float, jax.Array, jax.Array, float, jax.Array, jax.Array], _: None
@@ -86,9 +78,9 @@ def compute_particle_trajectory(
         )
         new_position = previous_position + time_step * new_momentum
 
-        gamma = 3
-        fourier_frequency = laser_parameters.frequency * (gamma**2)
-
+        # t is the time in the laboratory frame
+        laboratory_time = cast(float, new_position[0, 0] / c)
+        # x is the particle position in the laboratory frame
         particle_position = new_position[0, 1:4]
         particle_velocity = new_momentum[0, 1:4]
 
@@ -102,16 +94,22 @@ def compute_particle_trajectory(
         displacement = detector_displacement - particle_displacement
         displacement_norm = cast(float, jnp.linalg.vector_norm(displacement, axis=-1))
 
+        # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
+        view_direction = displacement / displacement_norm
+
         # omega * (t + R(x_0, t)/c)
-        oscillatory_kernel_exponent = fourier_frequency * (
-            proper_time + displacement_norm / c
+        oscillatory_kernel_exponent = central_frequency * (
+            laboratory_time + displacement_norm / c
         )
+
+        # Taylor series approximation:
+        # oscillatory_kernel_exponent = fourier_frequency * (
+        #     laboratory_time
+        #     - jnp.linalg.vecdot(particle_position, view_direction, axis=-1) / c
+        # )
 
         # \beta = v/c
         beta = particle_velocity / c
-
-        # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
-        view_direction = displacement / displacement_norm
 
         # ===== Electric field terms =====
         # Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))
@@ -121,7 +119,7 @@ def compute_particle_trajectory(
 
         # O(1/|R|) term
         # - ((i * omega) / c) * (common term) / |R(x_0, t)|
-        electric_field_first_term = -((1j * fourier_frequency) / c) * (
+        electric_field_first_term = -((1j * central_frequency) / c) * (
             electric_field_common_term / displacement_norm
         )
 
@@ -139,7 +137,7 @@ def compute_particle_trajectory(
 
         # ===== Magnetic field terms =====
         # O(1/|R|) term
-        magnetic_field_first_term = ((1j * fourier_frequency) / c) * (
+        magnetic_field_first_term = ((1j * central_frequency) / c) * (
             n_cross_beta / displacement_norm
         )
 
@@ -227,6 +225,17 @@ def main() -> None:
         azimuthal_index,
     )
 
+    # Relativistic factor
+    gamma = 10
+
+    # Exact formula for frequency Doppler shift factor
+    doppler_shift_factor = (
+        (gamma + np.sqrt(gamma**2 - 1)) / (gamma - np.sqrt(gamma**2 - 1))
+    ).item()
+
+    central_frequency = laser_parameters.frequency * doppler_shift_factor
+    print(f"Looking around Fourier frequency omega = {central_frequency}")
+
     seed = 17
     generator = np.random.default_rng(seed)
 
@@ -237,9 +246,6 @@ def main() -> None:
     initial_position = np.concatenate(
         (np.zeros((1, 1), dtype=np.float64), initial_position), axis=-1
     )
-
-    # Relativistic factor
-    gamma = 5
 
     initial_momentum = generate_initial_particle_momenta_moving_towards_laser(
         1, gamma, m_e
@@ -256,8 +262,20 @@ def main() -> None:
     pulse_parameters = PulseWithFlatPeakParameters(phi_0, tau_0, peak_duration_periods)
 
     integration_start_time = 0.0
-    integration_end_time = (6 * tau_0 + peak_duration_periods * tau_0) / gamma
-    time_step = ((2 * pi) / laser_frequency) / 100 / gamma
+    stretching_factor = gamma + np.sqrt(gamma**2 - 1)
+    integration_end_time = (
+        6 * tau_0 + peak_duration_periods * tau_0
+    ) / stretching_factor
+    time_step = ((2 * pi) / laser_frequency) / 100 / stretching_factor
+
+    detector_z_distance = -2 * 100_000 * laser_wavelength
+    spectrum_measurement_position = jnp.array(
+        (
+            25 * laser_parameters.wavelength,
+            -25 * laser_parameters.wavelength,
+            detector_z_distance,
+        )
+    )
 
     start_time = perf_counter()
 
@@ -269,7 +287,8 @@ def main() -> None:
         time_step,
         laser_parameters,
         pulse_parameters,
-        detector_z_distance=-2 * 100_000 * laser_wavelength,
+        central_frequency,
+        spectrum_measurement_position,
     )
 
     end_time = perf_counter()
@@ -296,11 +315,36 @@ def main() -> None:
 
     ax.plot(trajectory.timestamps, trajectory.oscillatory_kernel_exponents)
 
+    oscillatory_kernel_derivative = jnp.gradient(
+        trajectory.oscillatory_kernel_exponents, trajectory.timestamps
+    )
+
+    twin_ax = ax.twinx()
+    twin_ax.plot(trajectory.timestamps, oscillatory_kernel_derivative)
+
+    # ax.legend()
     ax.grid()
 
     fig.tight_layout()
     fig.savefig(plots_directory / "oscillatory_kernel_exponents.pdf")
 
+    ### Plot oscillatory kernel
+    fig, ax = plt.subplots(dpi=200)
+
+    fig.suptitle("Oscillatory kernel")
+
+    ax.set_title("$\\exp(i \\omega (t + R(x_0, t)/c))$")
+
+    ax.plot(
+        trajectory.timestamps,
+        jnp.real(jnp.exp(1j * trajectory.oscillatory_kernel_exponents)),
+    )
+    ax.grid()
+
+    fig.tight_layout()
+    fig.savefig(plots_directory / "oscillatory_kernel.pdf")
+
+    ### Plot amplitude function
     fig, ax = plt.subplots(dpi=200)
 
     fig.suptitle("Multiplier in the electric field integral")
