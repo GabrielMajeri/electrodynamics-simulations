@@ -6,14 +6,16 @@ from electrodynamics.beams import (
     LaguerreGaussBeamParameters,
     compute_laguerre_gauss_beam_fields,
 )
-from electrodynamics.constants import ELECTRON_CHARGE, ELECTRON_MASS, SPEED_OF_LIGHT
+from electrodynamics.constants import (
+    ELECTRON_CHARGE,
+    ELECTRON_MASS,
+    SPEED_OF_LIGHT as c,
+)
 from electrodynamics.fields import compute_acceleration_of_charged_particle_in_em_field
 from electrodynamics.pulse import (
     PulseWithFlatPeakParameters,
     gaussian_envelope_with_flat_peak,
 )
-
-c = SPEED_OF_LIGHT
 
 
 @jdc.jit

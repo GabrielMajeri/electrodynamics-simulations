@@ -2,9 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax_dataclasses as jdc
 
-from electrodynamics.constants import SPEED_OF_LIGHT
-
-c = SPEED_OF_LIGHT
+from electrodynamics.constants import SPEED_OF_LIGHT as c
 
 
 @jdc.jit

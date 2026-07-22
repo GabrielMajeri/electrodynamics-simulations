@@ -4,10 +4,14 @@ from time import perf_counter
 from typing import cast
 
 from electrodynamics.beams import LaguerreGaussBeamParameters
-from electrodynamics.constants import ELECTRON_CHARGE, ELECTRON_MASS, SPEED_OF_LIGHT
+from electrodynamics.constants import (
+    ELECTRON_CHARGE as q,
+    ELECTRON_MASS as m_e,
+    SPEED_OF_LIGHT as c,
+)
 from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_moving_towards_laser,
-    generate_initial_positions_on_disk,
+    generate_initial_positions_uniformly_on_disk,
 )
 from electrodynamics.integrate import compute_next_momentum_rk4
 from electrodynamics.jax import initialize_jax
@@ -20,11 +24,6 @@ import jax_dataclasses as jdc
 import matplotlib.pyplot as plt
 import numpy as np
 import typer
-
-
-c = SPEED_OF_LIGHT
-m_e = ELECTRON_MASS
-q = ELECTRON_CHARGE
 
 
 @jdc.pytree_dataclass
@@ -205,8 +204,6 @@ def main() -> None:
 
     # Normalized laser intensity
     a_0 = 1e-2
-    m_e = ELECTRON_MASS
-    q = ELECTRON_CHARGE
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarizations.RIGHT_CIRCULAR.value
@@ -241,7 +238,9 @@ def main() -> None:
 
     disk_radius = (1.75 + radial_index) * waist_radius
 
-    initial_position = generate_initial_positions_on_disk(generator, disk_radius, 1)
+    initial_position = generate_initial_positions_uniformly_on_disk(
+        generator, disk_radius, 1
+    )
     # Add a 0 on the first index to obtain a position 4-vector
     initial_position = np.concatenate(
         (np.zeros((1, 1), dtype=np.float64), initial_position), axis=-1

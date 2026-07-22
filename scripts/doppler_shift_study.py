@@ -16,7 +16,7 @@ from electrodynamics.detector import DetectorParameters, initialize_detector_pos
 from electrodynamics.fields import compute_scattered_electric_and_magnetic_fields
 from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_moving_towards_laser,
-    generate_initial_positions_on_disk,
+    generate_initial_positions_uniformly_on_disk,
 )
 from electrodynamics.integrate import compute_next_momentum_rk4
 from electrodynamics.jax import initialize_jax
@@ -61,6 +61,13 @@ def integrate_particles(
     under the action of the laser pulse.
     """
 
+    # TODO: make this configurable
+    central_frequencies = jnp.linspace(
+        central_frequency - 0.1 * central_frequency / 2,
+        central_frequency + 0.1 * central_frequency / 2,
+        1,
+    )
+
     frequencies = jnp.linspace(
         central_frequency - frequency_width / 2,
         central_frequency + frequency_width / 2,
@@ -102,7 +109,7 @@ def integrate_particles(
     )
 
     compute_scattered_fields_for_all_detector_positions = jax.vmap(
-        compute_scattered_electric_and_magnetic_fields,
+        compute_scattered_fields_for_all_frequencies,
         in_axes=(None, None, None, None, 0),
         out_axes=1,
     )
@@ -145,13 +152,17 @@ def integrate_particles(
 
         electric_field, magnetic_field = (
             compute_scattered_fields_for_all_detector_positions(
-                central_frequency,
+                central_frequencies,
                 new_position,
                 new_momenta,
                 initial_positions,
                 detector_positions,
             )
         )
+
+        electric_field = electric_field.sum(axis=-2)
+        magnetic_field = magnetic_field.sum(axis=-2)
+
         new_detector_electric_field = (
             previous_detector_electric_field + time_step * electric_field
         )
@@ -341,7 +352,7 @@ def main() -> None:
     # ~800 nm, red light
     laser_wavelength = (2 * pi * c) / laser_frequency
 
-    a_0 = 1e-2
+    a_0 = 1e-1
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarizations.RIGHT_CIRCULAR.value
@@ -368,7 +379,7 @@ def main() -> None:
 
     disk_radius = (1.75 + radial_index) * waist_radius
 
-    initial_positions = generate_initial_positions_on_disk(
+    initial_positions = generate_initial_positions_uniformly_on_disk(
         generator, disk_radius, num_electrons
     )
     # Add a 0 on the first index to obtain position 4-vectors
@@ -377,7 +388,7 @@ def main() -> None:
     )
 
     # Relativistic factor
-    gamma: float = 3
+    gamma: float = 10
 
     # TODO: give the electrons initial velocities and check what is
     # the Doppler-shifted frequency of the scattered radiation (should be ~ 4 \gamma^2)
@@ -397,10 +408,11 @@ def main() -> None:
     pulse_parameters = PulseWithFlatPeakParameters(phi_0, tau_0, peak_duration_periods)
 
     integration_start_time = 0.0
-    integration_end_time = (6 * tau_0 + peak_duration_periods * tau_0) / gamma
-    # integration_duration = integration_end_time - integration_start_time
-
-    time_step = ((2 * pi) / laser_frequency) / 100 / gamma
+    stretching_factor = gamma + np.sqrt(gamma**2 - 1)
+    integration_end_time = (
+        6 * tau_0 + peak_duration_periods * tau_0
+    ) / stretching_factor
+    time_step = ((2 * pi) / laser_frequency) / 100 / stretching_factor
 
     print(
         f"Integrating from t = {integration_start_time} to t = {integration_end_time}, with a time step of dt = {time_step}"
@@ -417,9 +429,9 @@ def main() -> None:
     num_frequencies = 128
 
     detector_parameters = DetectorParameters(
-        width=40 * 75 * laser_wavelength / 3,
-        height=40 * 75 * laser_wavelength / 3,
-        z_distance=-2 * 100_000 * laser_wavelength,
+        width=40 * 75 * laser_wavelength / 10,
+        height=40 * 75 * laser_wavelength / 10,
+        z_distance=-10 * 100_000 * laser_wavelength,
         grid_size_x=64,
         grid_size_y=64,
     )
@@ -500,10 +512,10 @@ def main() -> None:
 
     ### Electric/magnetic fields on detector screen
     detector_extent: tuple[float, float, float, float] = (
-        (-detector_parameters.width / 2) / laser_parameters.wavelength,
-        (+detector_parameters.width / 2) / laser_parameters.wavelength,
-        (-detector_parameters.height / 2) / laser_parameters.wavelength,
-        (+detector_parameters.height / 2) / laser_parameters.wavelength,
+        (-detector_parameters.width / 2) / waist_radius,
+        (+detector_parameters.width / 2) / waist_radius,
+        (-detector_parameters.height / 2) / waist_radius,
+        (+detector_parameters.height / 2) / waist_radius,
     )
 
     detector_electric_field = result.detector_electric_field.reshape(
@@ -523,16 +535,17 @@ def main() -> None:
             extent=detector_extent,
         )
 
-        ax.scatter(
-            spectrum_measurement_position[0] / laser_parameters.wavelength,
-            spectrum_measurement_position[1] / laser_parameters.wavelength,
-            marker="x",
-            c="green",
-            s=50,
-        )
+        # Uncomment to see where the frequency spectrum gets computed:
+        # ax.scatter(
+        #     spectrum_measurement_position[0] / waist_radius,
+        #     spectrum_measurement_position[1] / waist_radius,
+        #     marker="x",
+        #     c="green",
+        #     s=50,
+        # )
 
-        ax.set_xlabel("Detector $x$")
-        ax.set_ylabel("Detector $y$")
+        ax.set_xlabel("Detector $x/w_0$")
+        ax.set_ylabel("Detector $y/w_0$")
         ax.grid()
 
         fig.colorbar(image)
