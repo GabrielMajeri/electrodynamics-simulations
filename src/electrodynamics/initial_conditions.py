@@ -35,15 +35,15 @@ def generate_initial_positions_uniformly_within_ball(
     random_vectors = generator.normal(size=(num_particles, dimension))
 
     # Normalize them, turn them into unit vectors
-    random_unit_vectors = random_vectors / np.linalg.vector_norm(
-        random_vectors, axis=-1
+    random_unit_vectors = random_vectors / np.expand_dims(
+        np.linalg.vector_norm(random_vectors, axis=-1), axis=-1
     )
 
     # Scale them by some random radii, sampled proportionally
     # to the surface area of the corresponding sphere
-    random_radii = generator.uniform(low=0.0, high=ball_radius, size=num_particles) ** (
-        1 / dimension
-    )
+    random_radii = generator.uniform(
+        low=0.0, high=ball_radius, size=(num_particles, 1)
+    ) ** (1 / dimension)
 
     return random_radii * random_unit_vectors
 

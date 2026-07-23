@@ -12,15 +12,20 @@ import typer
 
 from electrodynamics.beams import LaguerreGaussBeamParameters
 from electrodynamics.constants import ELECTRON_CHARGE, ELECTRON_MASS, SPEED_OF_LIGHT
-from electrodynamics.detector import DetectorParameters, initialize_detector_positions
+from electrodynamics.detector import (
+    DetectorParameters,
+    initialize_detector_positions_negative_z,
+)
 from electrodynamics.fields import compute_scattered_electric_and_magnetic_fields
 from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_moving_towards_laser,
     generate_initial_positions_uniformly_on_disk,
+    generate_initial_positions_uniformly_within_ball,
 )
 from electrodynamics.integrate import compute_next_momentum_rk4
 from electrodynamics.jax import initialize_jax
 from electrodynamics.plotting import (
+    Arrow3D,
     plot_angular_momentum_distribution,
     plot_final_momentum_distribution,
 )
@@ -382,16 +387,19 @@ def main() -> None:
     initial_positions = generate_initial_positions_uniformly_on_disk(
         generator, disk_radius, num_electrons
     )
+
+    # ball_radius = disk_radius
+    # initial_positions = generate_initial_positions_uniformly_within_ball(
+    #     generator, ball_radius, num_electrons
+    # )
+
     # Add a 0 on the first index to obtain position 4-vectors
     initial_positions = np.concatenate(
         (np.zeros((num_electrons, 1), dtype=np.float64), initial_positions), axis=-1
     )
 
     # Relativistic factor
-    gamma: float = 10
-
-    # TODO: give the electrons initial velocities and check what is
-    # the Doppler-shifted frequency of the scattered radiation (should be ~ 4 \gamma^2)
+    gamma: float = 3
 
     initial_momenta = generate_initial_particle_momenta_moving_towards_laser(
         num_particles=num_electrons, gamma=gamma, particle_mass=m_e
@@ -429,23 +437,39 @@ def main() -> None:
     num_frequencies = 128
 
     detector_parameters = DetectorParameters(
-        width=40 * 75 * laser_wavelength / 10,
-        height=40 * 75 * laser_wavelength / 10,
-        z_distance=-10 * 100_000 * laser_wavelength,
+        width=20 * 75 * laser_wavelength,
+        height=20 * 75 * laser_wavelength,
         grid_size_x=64,
         grid_size_y=64,
     )
+    z_distance = -10 * 100_000 * laser_wavelength
 
-    detector_positions = initialize_detector_positions(detector_parameters)
+    detector_positions = initialize_detector_positions_negative_z(
+        detector_parameters, z_distance
+    )
+    detector_positions = jnp.asarray(detector_positions)
 
     spectrum_measurement_position = jnp.array(
         (
             25 * laser_parameters.wavelength,
             -25 * laser_parameters.wavelength,
-            detector_parameters.z_distance,
+            z_distance,
         )
     )
 
+    print("Plotting experimental setup")
+    plots_directory = Path("plots")
+    plots_directory.mkdir(parents=True, exist_ok=True)
+
+    plot_setup(
+        plots_directory,
+        initial_positions,
+        initial_momenta,
+        detector_parameters,
+        detector_positions,
+    )
+
+    print("Starting simulation")
     start_time = perf_counter()
 
     result = simulate_trajectories(
@@ -469,9 +493,6 @@ def main() -> None:
     print(f"Took {duration} seconds")
 
     print("Plotting results")
-
-    plots_directory = Path("plots")
-    plots_directory.mkdir(parents=True, exist_ok=True)
 
     ### Sample trajectory
     ### Final z-momentum distribution
@@ -573,6 +594,106 @@ def main() -> None:
 
     fig.tight_layout()
     fig.savefig(plots_directory / "electric_field_norm.pdf")
+
+
+def plot_setup(
+    plots_directory: Path,
+    positions: np.ndarray | jax.Array,
+    momenta: np.ndarray | jax.Array,
+    detector_parameters: DetectorParameters,
+    detector_positions: np.ndarray | jax.Array,
+) -> None:
+    assert len(positions) == len(momenta), (
+        "Positions and momenta arrays should correspond to the same number of particles"
+    )
+    num_particles = len(positions)
+    if num_particles > 1024:
+        # Sample a subset of the initial particle bunch
+        sample_indices = np.arange(1024)
+        positions = positions[sample_indices]
+        momenta = momenta[sample_indices]
+
+    assert positions.shape[-1] in (3, 4), (
+        "Positions should be an array of 3-vectors or 4-vectors"
+    )
+    if positions.shape[-1] == 4:
+        positions = positions[:, 1:4]
+
+    assert momenta.shape[-1] in (3, 4), (
+        "Momenta should be an array of 3-vectors or 4-vectors"
+    )
+    if momenta.shape[-1] == 4:
+        momenta = momenta[:, 1:4]
+
+    fig = plt.figure(figsize=(8, 5), dpi=300)
+    fig.suptitle("Experimental setup")
+
+    ax = fig.add_subplot(1, 2, 1, projection="3d")
+    ax.set_title("Initial positions and momenta")
+
+    # Draw the electrons
+    ax.scatter3D(positions[:, 0], positions[:, 1], positions[:, 2], s=3)  # pyright: ignore[reportArgumentType]
+
+    # Draw initial momenta as arrows
+    ax.quiver(
+        positions[:, 0],
+        positions[:, 1],
+        positions[:, 2],
+        momenta[:, 0],
+        momenta[:, 1],
+        momenta[:, 2],
+        linewidth=1,
+        length=5,
+        normalize=True,
+        color="orange",
+    )
+
+    ax.set_zlim(-10, 10)
+
+    ax = fig.add_subplot(1, 2, 2, projection="3d", computed_zorder=False)
+    ax.set_title("Detector, laser beam and particles")
+
+    # Draw electrons again
+    ax.scatter3D(positions[:, 0], positions[:, 1], positions[:, 2], s=3)  # pyright: ignore[reportArgumentType]
+
+    # Draw the detector mesh
+    detector_xs = detector_positions[:, 0].reshape(
+        detector_parameters.grid_size_y, detector_parameters.grid_size_x
+    )
+    detector_ys = detector_positions[:, 1].reshape(
+        detector_parameters.grid_size_y, detector_parameters.grid_size_x
+    )
+    detector_zs = detector_positions[:, 2].reshape(
+        detector_parameters.grid_size_y, detector_parameters.grid_size_x
+    )
+
+    # Plot as a surface mesh
+    ax.plot_surface(
+        detector_xs,
+        detector_ys,
+        detector_zs,
+        edgecolor="royalblue",
+        lw=0.5,
+        alpha=0.3,
+        zorder=1,
+    )
+
+    # Plot laser direction as an arrow
+    detector_z = detector_positions[0, 2]
+    laser_beam_direction_arrow = Arrow3D(
+        (0, 0),
+        (0, 0),
+        (detector_z * 0.75, detector_z * 0.25),
+        color="red",
+        lw=3,
+        arrowstyle="-|>",
+        mutation_scale=10,
+        zorder=5,
+    )
+    ax.add_artist(laser_beam_direction_arrow)
+
+    # fig.tight_layout()
+    fig.savefig(plots_directory / "experimental_setup.png")
 
 
 def plot_scattered_radiation_spectrum(
