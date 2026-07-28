@@ -41,8 +41,8 @@ def generate_initial_positions_uniformly_within_ball(
 
     # Scale them by some random radii, sampled proportionally
     # to the surface area of the corresponding sphere
-    random_radii = generator.uniform(
-        low=0.0, high=ball_radius, size=(num_particles, 1)
+    random_radii = ball_radius * generator.uniform(
+        low=0.0, high=1, size=(num_particles, 1)
     ) ** (1 / dimension)
 
     return random_radii * random_unit_vectors

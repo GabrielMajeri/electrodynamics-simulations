@@ -21,3 +21,6 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "electrodynamics"
+
+[tool.ruff.lint]
+ignore = ["I001"]

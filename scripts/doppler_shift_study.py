@@ -22,7 +22,7 @@ from electrodynamics.initial_conditions import (
     generate_initial_positions_uniformly_on_disk,
     generate_initial_positions_uniformly_within_ball,
 )
-from electrodynamics.integrate import compute_next_momentum_rk4
+from electrodynamics.integrate import integration_step_rk4
 from electrodynamics.jax import initialize_jax
 from electrodynamics.plotting import (
     Arrow3D,
@@ -132,18 +132,17 @@ def integrate_particles(
             previous_detector_magnetic_field,
         ) = u
 
-        new_momenta = compute_next_momentum_rk4(
+        new_positions, new_momenta = integration_step_rk4(
             previous_positions,
             previous_momenta,
             time_step,
             laser_parameters,
             pulse_parameters,
         )
-        new_position = previous_positions + time_step * new_momenta
 
         electric_field, magnetic_field = compute_scattered_fields_for_all_frequencies(
             frequencies,
-            new_position,
+            new_positions,
             new_momenta,
             initial_positions,
             spectrum_measurement_position,
@@ -158,7 +157,7 @@ def integrate_particles(
         electric_field, magnetic_field = (
             compute_scattered_fields_for_all_detector_positions(
                 central_frequencies,
-                new_position,
+                new_positions,
                 new_momenta,
                 initial_positions,
                 detector_positions,
@@ -177,7 +176,7 @@ def integrate_particles(
 
         u_next = (
             proper_time + time_step,
-            new_position,
+            new_positions,
             new_momenta,
             new_scattered_electric_field,
             new_scattered_magnetic_field,
@@ -357,11 +356,11 @@ def main() -> None:
     # ~800 nm, red light
     laser_wavelength = (2 * pi * c) / laser_frequency
 
-    a_0 = 1e-1
+    a_0 = 1
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarizations.RIGHT_CIRCULAR.value
-    waist_radius = 25 * laser_wavelength
+    waist_radius = 75 * laser_wavelength
 
     radial_index = 2
     azimuthal_index = -2
@@ -399,7 +398,7 @@ def main() -> None:
     )
 
     # Relativistic factor
-    gamma: float = 3
+    gamma: float = 1
 
     initial_momenta = generate_initial_particle_momenta_moving_towards_laser(
         num_particles=num_electrons, gamma=gamma, particle_mass=m_e
@@ -442,7 +441,7 @@ def main() -> None:
         grid_size_x=64,
         grid_size_y=64,
     )
-    z_distance = -10 * 100_000 * laser_wavelength
+    z_distance = -2 * 100_000 * laser_wavelength
 
     detector_positions = initialize_detector_positions_negative_z(
         detector_parameters, z_distance
@@ -648,7 +647,7 @@ def plot_setup(
         color="orange",
     )
 
-    ax.set_zlim(-10, 10)
+    # ax.set_zlim(-10, 10)
 
     ax = fig.add_subplot(1, 2, 2, projection="3d", computed_zorder=False)
     ax.set_title("Detector, laser beam and particles")

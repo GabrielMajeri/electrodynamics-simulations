@@ -49,13 +49,13 @@ def compute_electric_and_magnetic_fields(
 
 
 @jdc.jit
-def compute_next_momentum_euler(
+def integration_step_euler(
     previous_position: jax.Array,
     previous_momentum: jax.Array,
     time_step: float,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
-) -> jax.Array:
+) -> tuple[jax.Array, jax.Array]:
     tc, _, _, _ = previous_position.T
     laboratory_time = tc / c
 
@@ -74,7 +74,9 @@ def compute_next_momentum_euler(
 
     # TODO: add error checks
 
-    return previous_momentum + time_step * acceleration
+    new_momentum = previous_momentum + time_step * acceleration
+    new_position = previous_position + time_step * new_momentum
+    return new_position, new_momentum
 
 
 @jdc.jit
@@ -98,20 +100,21 @@ def compute_intermediate_acceleration(
 
 
 @jdc.jit
-def compute_next_momentum_rk4(
+def integration_step_rk4(
     previous_position: jax.Array,
     previous_momentum: jax.Array,
     time_step: float,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
-) -> jax.Array:
-    "Computes momentum at next time step using the 4th-order Runge-Kutta method."
-
+) -> tuple[jax.Array, jax.Array]:
+    """Updates the particles' positions and momenta using
+    a 4th order Runge-Kutta numerical integration scheme.
+    """
     tc, _, _, _ = previous_position.T
     laboratory_time = tc / c
 
-    # Runge-Kutta 4th order
-    k_1 = compute_intermediate_acceleration(
+    position_k_1 = time_step * previous_momentum
+    momentum_k_1 = time_step * compute_intermediate_acceleration(
         laboratory_time,
         previous_position,
         previous_momentum,
@@ -119,34 +122,42 @@ def compute_next_momentum_rk4(
         pulse_parameters,
     )
 
-    k_2 = compute_intermediate_acceleration(
-        laboratory_time + time_step / 2,
-        previous_position,
-        previous_momentum + time_step / 2 * k_1,
+    position_k_2 = time_step * (previous_momentum + momentum_k_1 / 2)
+    momentum_k_2 = time_step * compute_intermediate_acceleration(
+        laboratory_time + momentum_k_1.T[0] / (2 * c),
+        previous_position + position_k_1 / 2,
+        previous_momentum + momentum_k_1 / 2,
         laser_parameters,
         pulse_parameters,
     )
 
-    k_3 = compute_intermediate_acceleration(
-        laboratory_time + time_step / 2,
-        previous_position,
-        previous_momentum + time_step / 2 * k_2,
+    position_k_3 = time_step * (previous_momentum + momentum_k_2 / 2)
+    momentum_k_3 = time_step * compute_intermediate_acceleration(
+        laboratory_time + momentum_k_2.T[0] / (2 * c),
+        previous_position + position_k_2 / 2,
+        previous_momentum + momentum_k_2 / 2,
         laser_parameters,
         pulse_parameters,
     )
 
-    k_4 = compute_intermediate_acceleration(
-        laboratory_time + time_step,
-        previous_position,
-        previous_momentum + time_step * k_3,
+    position_k_4 = time_step * (previous_momentum + momentum_k_3)
+    momentum_k_4 = time_step * compute_intermediate_acceleration(
+        laboratory_time + momentum_k_3.T[0] / c,
+        previous_position + position_k_3,
+        previous_momentum + momentum_k_3,
         laser_parameters,
         pulse_parameters,
     )
 
-    acceleration = (k_1 + 2 * k_2 + 2 * k_3 + k_4) / 6
+    new_position = (
+        previous_position
+        + (position_k_1 + 2 * position_k_2 + 2 * position_k_3 + position_k_4) / 6
+    )
+    new_momentum = (
+        previous_momentum
+        + (momentum_k_1 + 2 * momentum_k_2 + 2 * momentum_k_3 + momentum_k_4) / 6
+    )
 
-    # TODO: implement sanity checks
-    # if check_for_errors:
-    #     check_integration_results(previous_momentum, acceleration)
+    # TODO: add error checks
 
-    return previous_momentum + time_step * acceleration
+    return new_position, new_momentum

@@ -13,7 +13,7 @@ from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_moving_towards_laser,
     generate_initial_positions_uniformly_on_disk,
 )
-from electrodynamics.integrate import compute_next_momentum_rk4
+from electrodynamics.integrate import integration_step_rk4
 from electrodynamics.jax import initialize_jax
 from electrodynamics.polarization import Polarizations
 from electrodynamics.pulse import PulseWithFlatPeakParameters
@@ -68,14 +68,13 @@ def compute_particle_trajectory(
             _previous_magnetic_field_component,
         ) = u
 
-        new_momentum = compute_next_momentum_rk4(
+        new_position, new_momentum = integration_step_rk4(
             previous_position,
             previous_momentum,
             time_step,
             laser_parameters,
             pulse_parameters,
         )
-        new_position = previous_position + time_step * new_momentum
 
         # t is the time in the laboratory frame
         laboratory_time = cast(float, new_position[0, 0] / c)
