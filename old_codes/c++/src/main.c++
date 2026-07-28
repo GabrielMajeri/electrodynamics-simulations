@@ -64,8 +64,8 @@ int main()
     std::cout << "Writing initial electron positions to disk..." << std::endl;
     write_npy_file("outputs/initial_positions.npy", initial_electron_positions);
 
-    // const auto initial_electron_momenta = generate_initial_electron_momenta_stationary(num_electrons);
-    const auto initial_electron_momenta = generate_initial_electron_momenta_random_velocity(num_electrons, seed);
+    const auto initial_electron_momenta = generate_initial_electron_momenta_stationary(num_electrons);
+    // const auto initial_electron_momenta = generate_initial_electron_momenta_random_velocity(num_electrons, seed);
 
     std::cout << "Generating detector positions" << std::endl;
     const auto detector_positions = initialize_detector_positions();

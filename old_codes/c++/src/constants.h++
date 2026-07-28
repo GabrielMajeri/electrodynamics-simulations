@@ -16,7 +16,8 @@ constexpr Real c = 137.036;
 #endif
 
 // constexpr size_t num_electrons = 1;
-// constexpr size_t num_electrons = 32;
+// constexpr size_t num_electrons = 2;
+// constexpr size_t num_electrons = 256;
 // constexpr size_t num_electrons = 1 * 1024;
 constexpr size_t num_electrons = 4 * 1024;
 // constexpr size_t num_electrons = 8 * 1024;
@@ -33,7 +34,7 @@ constexpr Real waist_radius = 75 * lambda;
 constexpr Real large_circle_radius = 75 * lambda;
 
 constexpr Real a_0 = 1;
-// constexpr Real a_0 = 1e-2;
+// constexpr Real a_0 = 1e-4;
 constexpr Real m_e = 1, q = -1;
 constexpr Real charge_to_mass_ratio = q / m_e;
 
@@ -55,7 +56,7 @@ constexpr auto phi_0 = 3 * tau_0;
 
 constexpr Real integration_start_time = 0.0, integration_end_time = 6 * tau_0;
 // constexpr Real integration_start_time = 0.0, integration_end_time = 40 * (2 * pi) / omega;
-constexpr Real integration_time_step = tau_0 / 100;
+constexpr Real integration_time_step = tau_0 / 200;
 
 constexpr Real integration_duration = integration_end_time - integration_start_time;
 constexpr std::size_t num_steps = integration_duration / integration_time_step;
@@ -66,4 +67,4 @@ constexpr Real detector_width = 20 * 75 * lambda;
 constexpr Real detector_height = 20 * 75 * lambda;
 
 // Needs to be far away
-constexpr auto detector_z = 2 * 100'000 * lambda;
+constexpr auto detector_z = -2 * 100'000 * lambda;
