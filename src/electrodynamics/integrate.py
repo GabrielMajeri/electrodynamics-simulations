@@ -20,15 +20,14 @@ from electrodynamics.pulse import (
 
 @jdc.jit
 def compute_electric_and_magnetic_fields(
-    time: float,
     position: jax.Array,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
 ) -> tuple[jax.Array, jax.Array]:
-    _, _, _, z = position.T
+    ct, _, _, z = position.T
 
     modulation = gaussian_envelope_with_flat_peak(
-        time - z / c,
+        (ct - z) / c,
         pulse_parameters.phi_0,
         pulse_parameters.tau_0,
         pulse_parameters.peak_duration_periods,
@@ -56,11 +55,7 @@ def integration_step_euler(
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
 ) -> tuple[jax.Array, jax.Array]:
-    tc, _, _, _ = previous_position.T
-    laboratory_time = tc / c
-
     electric_field, magnetic_field = compute_electric_and_magnetic_fields(
-        laboratory_time,
         previous_position,
         laser_parameters,
         pulse_parameters,
@@ -81,14 +76,13 @@ def integration_step_euler(
 
 @jdc.jit
 def compute_intermediate_acceleration(
-    time: float,
     position: jax.Array,
     momentum: jax.Array,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
 ) -> jax.Array:
     electric_field, magnetic_field = compute_electric_and_magnetic_fields(
-        time, position, laser_parameters, pulse_parameters
+        position, laser_parameters, pulse_parameters
     )
 
     return compute_acceleration_of_charged_particle_in_em_field(
@@ -110,12 +104,8 @@ def integration_step_rk4(
     """Updates the particles' positions and momenta using
     a 4th order Runge-Kutta numerical integration scheme.
     """
-    tc, _, _, _ = previous_position.T
-    laboratory_time = tc / c
-
     position_k_1 = time_step * previous_momentum
     momentum_k_1 = time_step * compute_intermediate_acceleration(
-        laboratory_time,
         previous_position,
         previous_momentum,
         laser_parameters,
@@ -124,7 +114,6 @@ def integration_step_rk4(
 
     position_k_2 = time_step * (previous_momentum + momentum_k_1 / 2)
     momentum_k_2 = time_step * compute_intermediate_acceleration(
-        laboratory_time + momentum_k_1.T[0] / (2 * c),
         previous_position + position_k_1 / 2,
         previous_momentum + momentum_k_1 / 2,
         laser_parameters,
@@ -133,7 +122,6 @@ def integration_step_rk4(
 
     position_k_3 = time_step * (previous_momentum + momentum_k_2 / 2)
     momentum_k_3 = time_step * compute_intermediate_acceleration(
-        laboratory_time + momentum_k_2.T[0] / (2 * c),
         previous_position + position_k_2 / 2,
         previous_momentum + momentum_k_2 / 2,
         laser_parameters,
@@ -142,7 +130,6 @@ def integration_step_rk4(
 
     position_k_4 = time_step * (previous_momentum + momentum_k_3)
     momentum_k_4 = time_step * compute_intermediate_acceleration(
-        laboratory_time + momentum_k_3.T[0] / c,
         previous_position + position_k_3,
         previous_momentum + momentum_k_3,
         laser_parameters,

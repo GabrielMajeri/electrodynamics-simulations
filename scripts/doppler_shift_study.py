@@ -356,7 +356,7 @@ def main() -> None:
     # ~800 nm, red light
     laser_wavelength = (2 * pi * c) / laser_frequency
 
-    a_0 = 1
+    a_0 = 1e-1
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarizations.RIGHT_CIRCULAR.value
