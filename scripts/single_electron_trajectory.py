@@ -296,6 +296,7 @@ def main() -> None:
     print("Plotting results")
 
     plots_directory = Path("plots")
+    plots_directory.mkdir(parents=True, exist_ok=True)
 
     plot_electron_trajectory(
         plots_directory,

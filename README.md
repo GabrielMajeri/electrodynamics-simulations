@@ -4,7 +4,7 @@
 
 This repository contains numerical codes for computing the angular momentum transferred to a bunch of charged particles (electrons) and the radiation scattered by them, when they are under the influence of a Laguerre-Gauss beam (from a laser, for example).
 
-They are implemented in [Python](https://www.python.org/), using [JAX](https://docs.jax.dev/en/latest/) for high-performance numerical linear algebra (including GPU support).
+They are implemented in [Python](https://www.python.org/), using [JAX](https://docs.jax.dev/en/latest/) for high-performance numerical linear algebra (including GPU support; tested with both NVIDIA CUDA and AMD ROCm).
 
 ## Features
 

@@ -18,7 +18,7 @@ def initialize_jax() -> None:
     # num_cpus = multiprocessing.cpu_count()
     # jax.config.update("jax_num_cpu_devices", min(128, num_cpus))
 
-    # print("Available JAX devices:", jax.local_devices())
+    print("Available JAX devices:", jax.local_devices())
 
     jax.config.update("jax_compilation_cache_dir", "jax_cache")
     jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
