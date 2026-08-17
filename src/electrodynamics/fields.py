@@ -1,3 +1,5 @@
+from math import pi
+
 import jax
 import jax.numpy as jnp
 import jax_dataclasses as jdc
@@ -106,4 +108,4 @@ def compute_scattered_electric_and_magnetic_fields(
         magnetic_field_first_term + magnetic_field_second_term
     )
 
-    return electric_field, magnetic_field
+    return electric_field / (2 * pi), magnetic_field / (2 * pi)

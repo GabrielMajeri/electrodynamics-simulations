@@ -1,7 +1,9 @@
+from datetime import datetime, UTC
+import json
 from math import pi
 from pathlib import Path
 from time import perf_counter
-from typing import cast
+from typing import Annotated, cast
 
 from electrodynamics.beams import LaguerreGaussBeamParameters
 from electrodynamics.constants import (
@@ -17,6 +19,7 @@ from electrodynamics.integrate import integration_step_rk4
 from electrodynamics.jax import initialize_jax
 from electrodynamics.polarization import Polarizations
 from electrodynamics.pulse import PulseWithFlatPeakParameters
+from electrodynamics.serialization import ConfigurationEncoder
 
 import jax
 import jax.numpy as jnp
@@ -191,9 +194,20 @@ def compute_particle_trajectory(
     )
 
 
-def main() -> None:
+def main(
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            help="Overwrite last run instead of creating a new directory, indexed with the timestamp of the current run."
+        ),
+    ],
+) -> None:
     "Computes the trajectory and the scattered electric field for a single electron."
 
+    run_datetime = datetime.now(UTC).astimezone()
+    print(f"Started run at {run_datetime}")
+
+    print("Configuring and initializing JAX")
     initialize_jax()
 
     # Monochromatic laser
@@ -202,7 +216,7 @@ def main() -> None:
     laser_wavelength = (2 * pi * c) / laser_frequency
 
     # Normalized laser intensity
-    a_0 = 1e-2
+    a_0 = 1e-1
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarizations.RIGHT_CIRCULAR.value
@@ -220,14 +234,18 @@ def main() -> None:
         radial_index,
         azimuthal_index,
     )
+    print("Laser parameters:", laser_parameters)
 
     # Relativistic factor
-    gamma = 10
+    gamma = 3
 
     # Exact formula for frequency Doppler shift factor
     doppler_shift_factor = (
         (gamma + np.sqrt(gamma**2 - 1)) / (gamma - np.sqrt(gamma**2 - 1))
     ).item()
+
+    print(f"Relativistic factor (gamma): {gamma}")
+    print(f"Corresponding Doppler shift: {doppler_shift_factor}")
 
     central_frequency = laser_parameters.frequency * doppler_shift_factor
     print(f"Looking around Fourier frequency omega = {central_frequency}")
@@ -235,7 +253,7 @@ def main() -> None:
     seed = 17
     generator = np.random.default_rng(seed)
 
-    disk_radius = (1.75 + radial_index) * waist_radius
+    disk_radius = 10 * laser_wavelength
 
     initial_position = generate_initial_positions_uniformly_on_disk(
         generator, disk_radius, 1
@@ -253,18 +271,23 @@ def main() -> None:
     initial_momentum = jnp.asarray(initial_momentum[0])
 
     ### Pulse parameters ###
-    tau_0 = 10 / laser_frequency
-    phi_0 = 3 * tau_0
+    tau_0 = (10 * jnp.pi) / laser_frequency
+    phi_0 = 5 * tau_0
     peak_duration_periods = 10
 
     pulse_parameters = PulseWithFlatPeakParameters(phi_0, tau_0, peak_duration_periods)
+    print("Pulse parameters:", pulse_parameters)
 
     integration_start_time = 0.0
     stretching_factor = gamma + np.sqrt(gamma**2 - 1)
     integration_end_time = (
-        6 * tau_0 + peak_duration_periods * tau_0
+        10 * tau_0 + peak_duration_periods * tau_0
     ) / stretching_factor
     time_step = ((2 * pi) / laser_frequency) / 100 / stretching_factor
+
+    print(
+        f"Integrating trajectory from t_initial = {integration_start_time}, up to t_final = {integration_end_time}, with a time step of dt = {time_step}"
+    )
 
     detector_z_distance = -2 * 100_000 * laser_wavelength
     spectrum_measurement_position = jnp.array(
@@ -275,6 +298,7 @@ def main() -> None:
         )
     )
 
+    print("Starting numerical integration...")
     start_time = perf_counter()
 
     trajectory = compute_particle_trajectory(
@@ -293,10 +317,32 @@ def main() -> None:
     duration = end_time - start_time
     print(f"Took {duration} seconds")
 
-    print("Plotting results")
+    print("Saving results to disk")
 
-    plots_directory = Path("plots")
-    plots_directory.mkdir(parents=True, exist_ok=True)
+    runs_directory = Path("runs")
+
+    if overwrite:
+        output_directory = runs_directory / "single_electron_trajectory_latest"
+    else:
+        timestamp = run_datetime.strftime("%Y-%d-%m_%H-%M-%S")
+        output_directory = runs_directory / f"single_electron_trajectory_{timestamp}"
+
+    output_directory.mkdir(parents=True, exist_ok=True)
+
+    configuration = {
+        "laser_parameters": laser_parameters,
+        "pulse_parameters": pulse_parameters,
+        "electrons_initial_gamma": gamma,
+        "time_start": integration_start_time,
+        "time_end": integration_end_time,
+        "time_delta": time_step,
+        "spectrum_measurement_position": spectrum_measurement_position,
+    }
+
+    with open(output_directory / "configuration.json", "w") as file:
+        json.dump(configuration, file, indent=2, cls=ConfigurationEncoder)
+
+    plots_directory = output_directory
 
     plot_electron_trajectory(
         plots_directory,
@@ -375,6 +421,8 @@ def main() -> None:
 
     fig.tight_layout()
     fig.savefig(plots_directory / "magnetic_field_multipliers.pdf")
+
+    print(f"Saved run output to '{output_directory}'")
 
 
 def plot_electron_trajectory(

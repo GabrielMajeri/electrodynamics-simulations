@@ -1,4 +1,4 @@
-from math import pi
+from math import factorial, pi, sqrt
 from typing import NamedTuple
 
 import jax
@@ -10,12 +10,16 @@ from .polarization import Polarization
 
 
 class EMField(NamedTuple):
+    "Convenience wrapper for the electric and magnetic field vectors."
+
     electric_field: jax.Array
     magnetic_field: jax.Array
 
 
 @jdc.pytree_dataclass
 class LaserParameters:
+    "Basic parameters for an abstract laser beam (e.g. plane wave)."
+
     frequency: float
     wavelength: float
     amplitude: float
@@ -24,11 +28,15 @@ class LaserParameters:
 
 @jdc.pytree_dataclass
 class GaussianBeamParameters(LaserParameters):
+    "Parameters for a Gaussian beam."
+
     waist_radius: float
 
 
 @jdc.pytree_dataclass
 class LaguerreGaussBeamParameters(GaussianBeamParameters):
+    "Parameters for a Laguerre-Gauss beam."
+
     radial_index: int
     azimuthal_index: int
 
@@ -36,7 +44,10 @@ class LaguerreGaussBeamParameters(GaussianBeamParameters):
 @jdc.jit
 def compute_plane_wave_fields(
     parameters: jdc.Static[LaserParameters], position: jax.Array
-) -> tuple[jax.Array, jax.Array]:
+) -> EMField:
+    """Evaluates the formulae for the electric and magnetic fields of
+    the plane wave beam with the given parameters, at the given position(s).
+    """
     assert position.shape[-1] == 4, "Positions must be 4-vectors"
 
     tc, _, _, z = position.T
@@ -64,13 +75,13 @@ def compute_plane_wave_fields(
 
     B = jnp.vstack((B_x, B_y, B_z)).T
 
-    return E, B
+    return EMField(electric_field=E, magnetic_field=B)
 
 
 @jdc.jit
 def compute_gaussian_beam_fields(
     parameters: jdc.Static[GaussianBeamParameters], position: jax.Array
-) -> tuple[jax.Array, jax.Array]:
+) -> EMField:
     assert position.shape[-1] == 4, "Positions must be 4-vectors"
 
     tc, x, y, z = position.T
@@ -123,7 +134,7 @@ def compute_gaussian_beam_fields(
 
     B = jnp.vstack((jnp.real(B_x), jnp.real(B_y), jnp.real(B_z))).T
 
-    return E, B
+    return EMField(electric_field=E, magnetic_field=B)
 
 
 @jdc.jit
@@ -137,6 +148,12 @@ def compute_laguerre_gauss_beam_fields(
 
     r = jnp.hypot(x, y)
     phi = jnp.arctan2(y, x)
+
+    normalization_factor = sqrt(
+        2
+        * factorial(parameters.radial_index)
+        / factorial(parameters.radial_index + abs(parameters.azimuthal_index))
+    )
 
     # w_0 = w(0)
     rayleigh_length = (pi * parameters.waist_radius**2) / parameters.wavelength
@@ -161,7 +178,8 @@ def compute_laguerre_gauss_beam_fields(
     r_over_wz_all_squared = (r / w_z) ** 2
 
     coefficients = (
-        parameters.amplitude
+        normalization_factor
+        * parameters.amplitude
         * (parameters.waist_radius / w_z)
         * jnp.pow(jnp.sqrt(2) * r / w_z, abs(parameters.azimuthal_index))
         * laguerre_polynomial(

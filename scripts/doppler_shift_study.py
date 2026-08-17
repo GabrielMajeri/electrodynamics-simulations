@@ -1,6 +1,9 @@
+from datetime import datetime, UTC
+import json
 from math import pi
 from pathlib import Path
 from time import perf_counter
+from typing import Annotated
 
 import jax
 import jax.numpy as jnp
@@ -31,6 +34,7 @@ from electrodynamics.plotting import (
 )
 from electrodynamics.polarization import Polarizations
 from electrodynamics.pulse import PulseWithFlatPeakParameters
+from electrodynamics.serialization import ConfigurationEncoder
 
 c = SPEED_OF_LIGHT
 m_e = ELECTRON_MASS
@@ -344,10 +348,19 @@ def compute_angular_momentum(
     )
 
 
-def main() -> None:
+def main(
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            help="Overwrite last run instead of creating a new directory, indexed with the timestamp of the current run."
+        ),
+    ],
+) -> None:
     """Simulates a Laguerre-Gauss laser pulse hitting a bunch of electrons moving at relativistic speeds.
     The scattered radiation, as measuerd on a simulated detector, is Doppler-shifted to much higher frequencies.
     """
+    run_datetime = datetime.now(UTC).astimezone()
+    print(f"Started run at {run_datetime}")
 
     initialize_jax()
 
@@ -408,16 +421,16 @@ def main() -> None:
     initial_momenta = jnp.asarray(initial_momenta)
 
     ### Pulse parameters ###
-    tau_0 = 10 / laser_frequency
-    phi_0 = 3 * tau_0
-    peak_duration_periods = 5
+    tau_0 = (10 * np.pi) / laser_frequency
+    phi_0 = 5 * tau_0
+    peak_duration_periods = 10
 
     pulse_parameters = PulseWithFlatPeakParameters(phi_0, tau_0, peak_duration_periods)
 
     integration_start_time = 0.0
     stretching_factor = gamma + np.sqrt(gamma**2 - 1)
     integration_end_time = (
-        6 * tau_0 + peak_duration_periods * tau_0
+        10 * tau_0 + peak_duration_periods * tau_0
     ) / stretching_factor
     time_step = ((2 * pi) / laser_frequency) / 100 / stretching_factor
 
@@ -438,8 +451,8 @@ def main() -> None:
     detector_parameters = DetectorParameters(
         width=20 * 75 * laser_wavelength,
         height=20 * 75 * laser_wavelength,
-        grid_size_x=64,
-        grid_size_y=64,
+        grid_size_x=32,
+        grid_size_y=32,
     )
     z_distance = -2 * 100_000 * laser_wavelength
 
@@ -450,8 +463,8 @@ def main() -> None:
 
     spectrum_measurement_position = jnp.array(
         (
-            25 * laser_parameters.wavelength,
-            -25 * laser_parameters.wavelength,
+            25 * laser_wavelength,
+            -25 * laser_wavelength,
             z_distance,
         )
     )
@@ -490,6 +503,33 @@ def main() -> None:
     end_time = perf_counter()
     duration = end_time - start_time
     print(f"Took {duration} seconds")
+
+    print("Saving results to disk")
+
+    runs_directory = Path("runs")
+
+    if overwrite:
+        output_directory = runs_directory / "doppler_shift_latest"
+    else:
+        timestamp = run_datetime.strftime("%Y-%d-%m_%H-%M-%S")
+        output_directory = runs_directory / f"doppler_shift_{timestamp}"
+
+    output_directory.mkdir(parents=True, exist_ok=True)
+
+    configuration = {
+        "laser_parameters": laser_parameters,
+        "pulse_parameters": pulse_parameters,
+        "electrons_initial_gamma": gamma,
+        "time_start": integration_start_time,
+        "time_end": integration_end_time,
+        "time_delta": time_step,
+        "spectrum_measurement_position": spectrum_measurement_position,
+    }
+
+    with open(output_directory / "configuration.json", "w") as file:
+        json.dump(configuration, file, indent=2, cls=ConfigurationEncoder)
+
+    plots_directory = output_directory
 
     print("Plotting results")
 

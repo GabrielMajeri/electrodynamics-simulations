@@ -7,25 +7,11 @@ __pycache__/
 # Installed Python module files
 *.egg-info
 
-# Compiled binary files
-*.exe
-*.o
-*.obj
-
-# Ignore generated and saved figures
-*.png
-*.jpg
-*.jpeg
-*.pdf
-
-# Generated NumPy .npy/.npz files
-*.npy
-
 # MacOS-generated files
 **/.DS_Store
 
 # Configured cache for JAX jitted functions
 jax_cache/
 
-# Default CMake build directory
-build/
+# Default run output directory
+/runs/
