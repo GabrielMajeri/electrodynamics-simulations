@@ -28,6 +28,3 @@ conflicts = [[{ extra = "cpu" }, { extra = "rocm" }, { extra = "cu130" }]]
 
 [tool.uv.build-backend]
 module-name = "electrodynamics"
-
-[tool.ruff.lint]
-ignore = ["I001"]

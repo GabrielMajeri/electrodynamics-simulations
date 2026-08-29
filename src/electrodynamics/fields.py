@@ -1,10 +1,28 @@
-from math import pi
+from math import pi, sqrt
 
 import jax
 import jax.numpy as jnp
 import jax_dataclasses as jdc
 
 from electrodynamics.constants import SPEED_OF_LIGHT as c
+
+
+def compute_doppler_shift_factor(
+    gamma: float, particle_mass: float, particle_charge: float, a_0: float
+) -> float:
+    """Computes the Doppler shift factor, the multiplier for the frequency
+    of the scattered radiation emitted from a particle moving at relativistic speeds.
+    """
+    mc = particle_mass * c
+
+    mc_gamma = mc * gamma
+    mc_sqrt_gamma = mc * sqrt(gamma**2 - 1)
+
+    return (mc_gamma + mc_sqrt_gamma) / (
+        mc_gamma
+        - mc_sqrt_gamma
+        + (a_0**2 * particle_charge**2) / (mc_gamma + mc_sqrt_gamma)
+    )
 
 
 @jdc.jit

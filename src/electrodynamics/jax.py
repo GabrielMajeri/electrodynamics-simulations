@@ -1,5 +1,4 @@
 import os
-
 import jax
 
 
@@ -15,6 +14,7 @@ def initialize_jax() -> None:
     jax.config.update("jax_enable_x64", True)
 
     # print("Enabling CPU parallelism in JAX")
+    # import multiprocessing
     # num_cpus = multiprocessing.cpu_count()
     # jax.config.update("jax_num_cpu_devices", min(128, num_cpus))
 

@@ -1,25 +1,9 @@
-from datetime import datetime, UTC
 import json
+from datetime import UTC, datetime
 from math import pi
 from pathlib import Path
 from time import perf_counter
 from typing import Annotated, cast
-
-from electrodynamics.beams import LaguerreGaussBeamParameters
-from electrodynamics.constants import (
-    ELECTRON_CHARGE as q,
-    ELECTRON_MASS as m_e,
-    SPEED_OF_LIGHT as c,
-)
-from electrodynamics.initial_conditions import (
-    generate_initial_particle_momenta_moving_towards_laser,
-    generate_initial_positions_uniformly_on_disk,
-)
-from electrodynamics.integrate import integration_step_rk4
-from electrodynamics.jax import initialize_jax
-from electrodynamics.polarization import Polarizations
-from electrodynamics.pulse import PulseWithFlatPeakParameters
-from electrodynamics.serialization import ConfigurationEncoder
 
 import jax
 import jax.numpy as jnp
@@ -27,6 +11,31 @@ import jax_dataclasses as jdc
 import matplotlib.pyplot as plt
 import numpy as np
 import typer
+from rich import print
+
+from electrodynamics.beams import LaguerreGaussBeamParameters
+from electrodynamics.constants import (
+    ELECTRON_CHARGE as q,
+)
+from electrodynamics.constants import (
+    ELECTRON_MASS as m_e,
+)
+from electrodynamics.constants import (
+    SPEED_OF_LIGHT as c,
+)
+from electrodynamics.fields import compute_doppler_shift_factor
+from electrodynamics.initial_conditions import (
+    generate_initial_particle_momenta_moving_towards_laser,
+    generate_initial_positions_uniformly_on_disk,
+)
+from electrodynamics.integrate import integration_step_rk4
+from electrodynamics.jax import initialize_jax
+from electrodynamics.polarization import Polarizations
+from electrodynamics.pulse import (
+    PulseWithFlatPeakParameters,
+    gaussian_envelope_with_flat_peak,
+)
+from electrodynamics.serialization import ConfigurationEncoder
 
 
 @jdc.pytree_dataclass
@@ -195,14 +204,30 @@ def compute_particle_trajectory(
 
 
 def main(
+    radial_index: Annotated[
+        int, typer.Option(help="Integer counting radial nodes of the LG beam profile")
+    ] = 2,
+    azimuthal_index: Annotated[
+        int,
+        typer.Option(
+            help="Integer controlling the on-axis phase singularity (topological charge)."
+        ),
+    ] = -2,
+    a_0: Annotated[float, typer.Option(help="Normalized laser intensity")] = 1e-1,
+    gamma: Annotated[float, typer.Option(help="Electrons' relativistic factor")] = 1,
+    seed: Annotated[int, typer.Option(help="Seed for random number generator")] = 42,
     overwrite: Annotated[
         bool,
         typer.Option(
             help="Overwrite last run instead of creating a new directory, indexed with the timestamp of the current run."
         ),
-    ],
+    ] = False,
 ) -> None:
     "Computes the trajectory and the scattered electric field for a single electron."
+
+    if radial_index < 0:
+        print("`radial_index` must be a non-negative integer")
+        raise typer.Exit(1)
 
     run_datetime = datetime.now(UTC).astimezone()
     print(f"Started run at {run_datetime}")
@@ -215,15 +240,9 @@ def main(
     # ~800 nm, red light
     laser_wavelength = (2 * pi * c) / laser_frequency
 
-    # Normalized laser intensity
-    a_0 = 1e-1
-
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     polarization = Polarizations.RIGHT_CIRCULAR.value
     waist_radius = 75 * laser_wavelength
-
-    radial_index = 2
-    azimuthal_index = -2
 
     laser_parameters = LaguerreGaussBeamParameters(
         laser_frequency,
@@ -236,13 +255,8 @@ def main(
     )
     print("Laser parameters:", laser_parameters)
 
-    # Relativistic factor
-    gamma = 3
-
     # Exact formula for frequency Doppler shift factor
-    doppler_shift_factor = (
-        (gamma + np.sqrt(gamma**2 - 1)) / (gamma - np.sqrt(gamma**2 - 1))
-    ).item()
+    doppler_shift_factor = compute_doppler_shift_factor(gamma, m_e, q, a_0)
 
     print(f"Relativistic factor (gamma): {gamma}")
     print(f"Corresponding Doppler shift: {doppler_shift_factor}")
@@ -250,7 +264,6 @@ def main(
     central_frequency = laser_parameters.frequency * doppler_shift_factor
     print(f"Looking around Fourier frequency omega = {central_frequency}")
 
-    seed = 17
     generator = np.random.default_rng(seed)
 
     disk_radius = 10 * laser_wavelength
@@ -289,7 +302,7 @@ def main(
         f"Integrating trajectory from t_initial = {integration_start_time}, up to t_final = {integration_end_time}, with a time step of dt = {time_step}"
     )
 
-    detector_z_distance = -2 * 100_000 * laser_wavelength
+    detector_z_distance = -25_000 * laser_wavelength
     spectrum_measurement_position = jnp.array(
         (
             25 * laser_parameters.wavelength,
@@ -335,14 +348,43 @@ def main(
         "electrons_initial_gamma": gamma,
         "time_start": integration_start_time,
         "time_end": integration_end_time,
+        "time_end_in_multiples_of_tau_0": f"{integration_end_time / tau_0} * tau_0",
         "time_delta": time_step,
         "spectrum_measurement_position": spectrum_measurement_position,
+        "spectrum_measurement_position_in_multiples_of_lambda": spectrum_measurement_position
+        / laser_wavelength,
     }
 
     with open(output_directory / "configuration.json", "w") as file:
         json.dump(configuration, file, indent=2, cls=ConfigurationEncoder)
 
     plots_directory = output_directory
+
+    # Plot laser pulse envelope
+    fig, ax = plt.subplots(dpi=200)
+
+    fig.suptitle("Laser pulse envelope")
+
+    phi = jnp.linspace(0, 10 * tau_0 + peak_duration_periods * tau_0, 1000)
+    envelope = jnp.abs(
+        jnp.exp(1j * laser_parameters.frequency * phi)
+        * gaussian_envelope_with_flat_peak(
+            phi,
+            pulse_parameters.phi_0,
+            pulse_parameters.tau_0,
+            pulse_parameters.peak_duration_periods,
+        )
+    )
+
+    ax.plot(phi / ((2 * jnp.pi) / laser_frequency), envelope)
+
+    ax.set_xlabel("$\\phi$ (periods)")
+    ax.set_ylabel("Envelope")
+
+    ax.grid()
+
+    fig.tight_layout()
+    fig.savefig(plots_directory / "laser_pulse_envelope.pdf")
 
     plot_electron_trajectory(
         plots_directory,
