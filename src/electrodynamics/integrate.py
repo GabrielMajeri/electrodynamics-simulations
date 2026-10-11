@@ -9,7 +9,7 @@ from electrodynamics.beams import (
 from electrodynamics.constants import (
     ELECTRON_CHARGE,
     ELECTRON_MASS,
-    SPEED_OF_LIGHT as c,
+    SPEED_OF_LIGHT,
 )
 from electrodynamics.fields import compute_acceleration_of_charged_particle_in_em_field
 from electrodynamics.pulse import (
@@ -27,7 +27,7 @@ def compute_electric_and_magnetic_fields(
     ct, _, _, z = position.T
 
     modulation = gaussian_envelope_with_flat_peak(
-        (ct - z) / c,
+        (ct - z) / SPEED_OF_LIGHT,
         pulse_parameters.phi_0,
         pulse_parameters.tau_0,
         pulse_parameters.peak_duration_periods,

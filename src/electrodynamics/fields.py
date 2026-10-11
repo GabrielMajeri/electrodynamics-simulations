@@ -53,6 +53,7 @@ def compute_scattered_electric_and_magnetic_fields(
     momentum: jax.Array,
     initial_position: jax.Array,
     detector_position: jax.Array,
+    include_second_order_terms: jdc.Static[bool] = False,
 ) -> tuple[jax.Array, jax.Array]:
     """Computes the scattered electric/magnetic field from a moving charge,
     using the formulas for the Liénard-Wiechert potentials.
@@ -91,39 +92,43 @@ def compute_scattered_electric_and_magnetic_fields(
         view_direction, jnp.cross(view_direction, beta)
     )
 
-    # O(1/|R|) term
+    # Electric field O(1/|R|) term
     # - ((i * omega) / c) * (common term) / |R(x_0, t)|
     electric_field_first_term = -((1j * frequency) / c) * (
         electric_field_common_term / displacement_norm
     )
 
-    displacement_norm_squared = displacement_norm * displacement_norm
-
-    # O(1/|R|^2) term
-    # [(common term) + n(x_0, t) * (1 + dot(n(x_0, t), \beta(t)))] / |R(x_0, t)|^2
-    electric_field_second_term = (
-        electric_field_common_term
-        + view_direction
-        * jnp.expand_dims(1 + jnp.linalg.vecdot(view_direction, beta), axis=-1)
-    ) / displacement_norm_squared
-
     n_cross_beta = jnp.cross(view_direction, beta)
 
-    # ===== Magnetic field terms =====
-    # O(1/|R|) term
+    # Magnetic field O(1/|R|) term
     magnetic_field_first_term = ((1j * frequency) / c) * (
         n_cross_beta / displacement_norm
     )
 
-    # O(1/|R|^2) term
-    magnetic_field_second_term = n_cross_beta / displacement_norm_squared
+    # O(1/|R|^2) terms
+    if include_second_order_terms:
+        displacement_norm_squared = displacement_norm * displacement_norm
 
-    # Add up the components
-    electric_field = oscillatory_kernel * (
-        electric_field_first_term + electric_field_second_term
-    )
-    magnetic_field = oscillatory_kernel * (
-        magnetic_field_first_term + magnetic_field_second_term
-    )
+        # [(common term) + n(x_0, t) * (1 + dot(n(x_0, t), \beta(t)))] / |R(x_0, t)|^2
+        electric_field_second_term = (
+            electric_field_common_term
+            + view_direction
+            * jnp.expand_dims(1 + jnp.linalg.vecdot(view_direction, beta), axis=-1)
+        ) / displacement_norm_squared
+
+        # n(x_0, t) \times \beta(t) / |R(x_0, t)|^2
+        magnetic_field_second_term = n_cross_beta / displacement_norm_squared
+
+        # Add up the components
+        electric_field_terms = electric_field_first_term + electric_field_second_term
+        magnetic_field_terms = magnetic_field_first_term + magnetic_field_second_term
+
+    else:
+        # Use only the first-order terms
+        electric_field_terms = electric_field_first_term
+        magnetic_field_terms = magnetic_field_first_term
+
+    electric_field = oscillatory_kernel * electric_field_terms
+    magnetic_field = oscillatory_kernel * magnetic_field_terms
 
     return electric_field / (2 * pi), magnetic_field / (2 * pi)
