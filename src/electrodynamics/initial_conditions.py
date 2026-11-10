@@ -11,15 +11,13 @@ def generate_initial_positions_uniformly_on_disk(
 
     The disk lies in the x-y plane, described by z = 0.
     """
-    positions = np.empty((num_particles, 3), dtype=np.float64)
+    positions = np.zeros((num_particles, 3), dtype=np.float64)
 
-    for index in range(num_particles):
-        radius = np.sqrt(generator.uniform(low=0, high=disk_radius**2))
-        angle = generator.uniform(low=0, high=2 * np.pi)
+    radii = np.sqrt(generator.uniform(low=0.0, high=disk_radius**2, size=num_particles))
+    angles = generator.uniform(low=0.0, high=2 * np.pi, size=num_particles)
 
-        positions[index][0] = radius * np.cos(angle)
-        positions[index][1] = radius * np.sin(angle)
-        positions[index][2] = 0
+    positions[:, 0] = radii * np.cos(angles)
+    positions[:, 1] = radii * np.sin(angles)
 
     return positions
 

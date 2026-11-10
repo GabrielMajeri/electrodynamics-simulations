@@ -64,7 +64,7 @@ def integration_step_euler(
         previous_momentum,
         electric_field,
         magnetic_field,
-        charge_to_mass_ratio=-1,
+        charge_to_mass_ratio=ELECTRON_CHARGE / ELECTRON_MASS,
     )
 
     # TODO: add error checks

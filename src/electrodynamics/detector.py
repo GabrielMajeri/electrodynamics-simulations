@@ -1,7 +1,6 @@
+import jax_dataclasses as jdc
 import numpy as np
 from scipy.spatial.transform import Rotation
-
-import jax_dataclasses as jdc
 
 
 @jdc.pytree_dataclass
@@ -35,13 +34,10 @@ def initialize_detector_positions_negative_z(
         -parameters.width / 2, parameters.width / 2, parameters.grid_size_x
     )
 
-    positions: list[tuple[float, float, float]] = []
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    grid_z = np.full_like(grid_x, z_distance)
 
-    for y in ys:
-        for x in xs:
-            positions.append((x, y, z_distance))
-
-    return np.asarray(positions)
+    return np.stack((grid_x, grid_y, grid_z), axis=-1).reshape(-1, 3)
 
 
 def initialize_detector_positions(
@@ -50,7 +46,6 @@ def initialize_detector_positions(
     """Initializes the positions for the 2D grid describing the simulated detector's pixels,
     located at an arbitrary point in space, looking towards the given direction.
     """
-    # First, we generate the points at the origin
     ys = np.linspace(
         -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
     )
@@ -58,13 +53,10 @@ def initialize_detector_positions(
         -parameters.width / 2, parameters.width / 2, parameters.grid_size_x
     )
 
-    positions_list: list[tuple[float, float, float]] = []
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    grid_z = np.zeros_like(grid_x)
 
-    for y in ys:
-        for x in xs:
-            positions_list.append((x, y, 0))
-
-    positions_arr = np.asarray(positions_list)
+    positions_arr = np.stack((grid_x, grid_y, grid_z), axis=-1).reshape(-1, 3)
 
     rotation = Rotation.from_rotvec(view_direction)
     positions_arr = rotation.apply(positions_arr)

@@ -118,8 +118,9 @@ def compute_particle_trajectory(
         #     - jnp.linalg.vecdot(particle_position, view_direction, axis=-1) / c
         # )
 
-        # \beta = v/c
+        # \gamma \beta = u / c (scaled by dt/d\tau = \gamma for proper time integration)
         beta = particle_velocity / c
+        gamma_factor = cast(float, new_momentum[0, 0] / c)
 
         # ===== Electric field terms =====
         # Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))
@@ -136,11 +137,11 @@ def compute_particle_trajectory(
         displacement_norm_squared = displacement_norm * displacement_norm
 
         # O(1/|R|^2) term
-        # [(common term) + n(x_0, t) * (1 + dot(n(x_0, t), \beta(t)))] / |R(x_0, t)|^2
+        # [(common term) + n(x_0, t) * (\gamma + dot(n(x_0, t), \gamma \beta(t)))] / |R(x_0, t)|^2
         electric_field_second_term = (
             electric_field_common_term
             + view_direction
-            * jnp.expand_dims(1 + jnp.linalg.vecdot(view_direction, beta), axis=-1)
+            * jnp.expand_dims(gamma_factor + jnp.linalg.vecdot(view_direction, beta), axis=-1)
         ) / displacement_norm_squared
 
         n_cross_beta = jnp.cross(view_direction, beta)
@@ -337,7 +338,7 @@ def main(
     if overwrite:
         output_directory = runs_directory / "single_electron_trajectory_latest"
     else:
-        timestamp = run_datetime.strftime("%Y-%d-%m_%H-%M-%S")
+        timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
         output_directory = runs_directory / f"single_electron_trajectory_{timestamp}"
 
     output_directory.mkdir(parents=True, exist_ok=True)

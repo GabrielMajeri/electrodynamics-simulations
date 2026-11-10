@@ -130,7 +130,7 @@ def compute_gaussian_beam_fields(
 
     B_x = -E_y / c
     B_y = E_x / c
-    B_z = 1j / (parameters.frequency * w_z**2) * (y * E_x - x * E_y)
+    B_z = (2j) / (parameters.frequency * w_z**2) * (y * E_x - x * E_y)
 
     B = jnp.vstack((jnp.real(B_x), jnp.real(B_y), jnp.real(B_z))).T
 
@@ -210,7 +210,7 @@ def compute_laguerre_gauss_beam_fields(
 
     B_x = -E_y / c
     B_y = E_x / c
-    B_z = 1j / (parameters.frequency * w_z**2) * (y * E_x - x * E_y)
+    B_z = (2j) / (parameters.frequency * w_z**2) * (y * E_x - x * E_y)
 
     B = jnp.vstack((jnp.real(B_x), jnp.real(B_y), jnp.real(B_z))).T
 

@@ -60,7 +60,11 @@ def compute_scattered_electric_and_magnetic_fields(
     """
     laboratory_time = jnp.expand_dims(position[:, 0], axis=-1) / c
     particle_position = position[:, 1:4]
+    # Note: momentum is 4-momentum u^\mu = (\gamma c, \gamma v) (with particle mass = 1 in atomic units).
+    # Since trajectory integration is performed with respect to proper time \tau (d\tau = dt / \gamma),
+    # the integration factor dt = \gamma d\tau absorbs \gamma so that \beta_code = particle_velocity / c = \gamma \beta.
     particle_velocity = momentum[:, 1:4]
+    gamma_factor = jnp.expand_dims(momentum[:, 0] / c, axis=-1)
     initial_position = initial_position[:, 1:4]
 
     # r_0(t) = r(t) - R_0
@@ -83,7 +87,7 @@ def compute_scattered_electric_and_magnetic_fields(
         1j * frequency * (laboratory_time + displacement_norm / c)
     )
 
-    # \beta = v/c
+    # \gamma \beta = u / c (scaled by dt/d\tau = \gamma for proper time integration)
     beta = particle_velocity / c
 
     # ===== Electric field terms =====
@@ -109,11 +113,14 @@ def compute_scattered_electric_and_magnetic_fields(
     if include_second_order_terms:
         displacement_norm_squared = displacement_norm * displacement_norm
 
-        # [(common term) + n(x_0, t) * (1 + dot(n(x_0, t), \beta(t)))] / |R(x_0, t)|^2
+        # [(common term) + n(x_0, t) * (\gamma + dot(n(x_0, t), \gamma \beta(t)))] / |R(x_0, t)|^2
         electric_field_second_term = (
             electric_field_common_term
             + view_direction
-            * jnp.expand_dims(1 + jnp.linalg.vecdot(view_direction, beta), axis=-1)
+            * (
+                gamma_factor
+                + jnp.expand_dims(jnp.linalg.vecdot(view_direction, beta), axis=-1)
+            )
         ) / displacement_norm_squared
 
         # n(x_0, t) \times \beta(t) / |R(x_0, t)|^2

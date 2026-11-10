@@ -7,11 +7,15 @@ requires-python = ">=3.14"
 dependencies = [
     "jax-dataclasses>=1.6.3",
     "matplotlib>=3.10.8",
-    "numba>=0.65.1",
     "numpy>=2.4.1",
+    "rich>=13.0.0",
     "scipy>=1.17.1",
-    "tqdm>=4.67.3",
     "typer>=0.26.8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
 ]
 
 [build-system]

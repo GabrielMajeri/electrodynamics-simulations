@@ -252,16 +252,23 @@ def simulate_trajectories(
     spectrum_measurement_position: jax.Array,
     detector_parameters: jdc.Static[DetectorParameters],
     detector_positions: jdc.Static[jax.Array],
+    batch_size: jdc.Static[int],
 ) -> IntegrationResult:
     print("Integrating trajectory for all particles and computing scattered field")
 
     num_devices = min(len(initial_positions), len(jax.devices()))
-    # print(f"Mesh grid size: {num_devices}")
+    if len(initial_positions) % batch_size != 0:
+        raise ValueError(
+            f"Number of electrons ({len(initial_positions)}) must be divisible by batch_size ({batch_size})"
+        )
+    if batch_size % num_devices != 0:
+        raise ValueError(
+            f"Batch size ({batch_size}) must be divisible by number of devices ({num_devices})"
+        )
 
     mesh = jax.make_mesh((num_devices,), ("i",))
     with jax.set_mesh(mesh):
-        batch_size = 1024
-        num_batches = max(1, len(initial_positions) // batch_size)
+        num_batches = len(initial_positions) // batch_size
 
         batches = zip(
             jnp.split(initial_positions, num_batches, axis=0),
@@ -270,10 +277,18 @@ def simulate_trajectories(
 
         final_positions = []
         final_momenta = []
-        scattered_electric_field_spectrum = jnp.zeros((num_frequencies, 3))
-        scattered_magnetic_field_spectrum = jnp.zeros((num_frequencies, 3))
-        detector_electric_field = jnp.zeros((len(detector_positions), 3))
-        detector_magnetic_field = jnp.zeros((len(detector_positions), 3))
+        scattered_electric_field_spectrum = jnp.zeros(
+            (num_frequencies, 3), dtype=jnp.complex128
+        )
+        scattered_magnetic_field_spectrum = jnp.zeros(
+            (num_frequencies, 3), dtype=jnp.complex128
+        )
+        detector_electric_field = jnp.zeros(
+            (len(detector_positions), 3), dtype=jnp.complex128
+        )
+        detector_magnetic_field = jnp.zeros(
+            (len(detector_positions), 3), dtype=jnp.complex128
+        )
 
         for index, batch in enumerate(batches):
             print(f"Batch #{index}")
@@ -339,11 +354,12 @@ def simulate_trajectories(
 
 @jdc.jit
 def compute_angular_momentum(
-    positions: jax.Array, momenta: jax.Array, particle_mass: jdc.Static[float]
+    positions: jax.Array, momenta: jax.Array
 ) -> jax.Array:
-    return particle_mass * (
-        positions[:, 1] * momenta[:, 2] - positions[:, 2] * momenta[:, 1]
-    )
+    # positions has components [ct, x, y, z] or [x, y, z]
+    # momenta has components [p0, px, py, pz]
+    # L_z = x * py - y * px
+    return positions[:, 1] * momenta[:, 2] - positions[:, 2] * momenta[:, 1]
 
 
 def main(
@@ -360,7 +376,10 @@ def main(
     gamma: Annotated[float, typer.Option(help="Electrons' relativistic factor")] = 1,
     num_electrons: Annotated[
         int, typer.Option(help="Number of electrons to simulate")
-    ] = 4096,
+    ] = 1024,
+    batch_size: Annotated[
+        int, typer.Option(help="Number of electrons to simulate in each batch")
+    ] = 512,
     frequency_window_percentage: Annotated[
         float,
         typer.Option(
@@ -461,8 +480,8 @@ def main(
     detector_parameters = DetectorParameters(
         width=10 * 75 * laser_wavelength,
         height=10 * 75 * laser_wavelength,
-        grid_size_x=32,
-        grid_size_y=32,
+        grid_size_x=64,
+        grid_size_y=64,
     )
     z_distance = -25_000 * laser_wavelength
 
@@ -484,7 +503,7 @@ def main(
     if overwrite:
         output_directory = runs_directory / "oam_transfer_latest"
     else:
-        timestamp = run_datetime.strftime("%Y-%d-%m_%H-%M-%S")
+        timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
         output_directory = runs_directory / f"oam_transfer_{timestamp}"
 
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -540,6 +559,7 @@ def main(
         spectrum_measurement_position,
         detector_parameters,
         detector_positions,
+        batch_size,
     )
 
     end_time = perf_counter()
@@ -556,7 +576,7 @@ def main(
         fig,
         np.asarray(initial_positions[:, 1:4]),
         waist_radius,
-        np.asarray(result.final_momenta[:, 4]),
+        np.asarray(result.final_momenta[:, 3]),
     )
 
     fig.savefig(plots_directory / "final_momenta.png")
@@ -565,7 +585,7 @@ def main(
     fig = plt.figure(dpi=200)
 
     angular_momenta = compute_angular_momentum(
-        result.final_positions, result.final_momenta, m_e
+        result.final_positions, result.final_momenta
     )
 
     plot_angular_momentum_distribution(

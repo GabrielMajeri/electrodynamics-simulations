@@ -173,24 +173,36 @@ def simulate_trajectories(
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
     spectrum_measurement_position: jax.Array,
+    batch_size: jdc.Static[int] = 1024,
 ) -> IntegrationResult:
     print(
         "Simulating trajectories for all particles and computing frequency spectrum of scattered field"
     )
 
     num_devices = min(len(initial_positions), len(jax.devices()))
+    if len(initial_positions) % batch_size != 0:
+        raise ValueError(
+            f"Number of electrons ({len(initial_positions)}) must be divisible by batch_size ({batch_size})"
+        )
+    if batch_size % num_devices != 0:
+        raise ValueError(
+            f"Batch size ({batch_size}) must be divisible by number of devices ({num_devices})"
+        )
 
     mesh = jax.make_mesh((num_devices,), ("i",))
     with jax.set_mesh(mesh):
-        batch_size = 1024
-        num_batches = max(1, len(initial_positions) // batch_size)
+        num_batches = len(initial_positions) // batch_size
 
         batches = zip(
             jnp.split(initial_positions, num_batches, axis=0),
             jnp.split(initial_momenta, num_batches, axis=0),
         )
-        scattered_electric_field_spectrum = jnp.zeros((num_frequencies, 3))
-        scattered_magnetic_field_spectrum = jnp.zeros((num_frequencies, 3))
+        scattered_electric_field_spectrum = jnp.zeros(
+            (num_frequencies, 3), dtype=jnp.complex128
+        )
+        scattered_magnetic_field_spectrum = jnp.zeros(
+            (num_frequencies, 3), dtype=jnp.complex128
+        )
 
         for index, batch in enumerate(batches):
             print(f"Batch #{index}")
@@ -247,6 +259,9 @@ def main(
     num_electrons: Annotated[
         int, typer.Option(help="Number of electrons to simulate")
     ] = 4096,
+    batch_size: Annotated[
+        int, typer.Option(help="Number of electrons to simulate in each batch")
+    ] = 1024,
     frequency_window_percentage: Annotated[
         float,
         typer.Option(
@@ -357,7 +372,7 @@ def main(
     if overwrite:
         output_directory = runs_directory / "doppler_shift_latest"
     else:
-        timestamp = run_datetime.strftime("%Y-%d-%m_%H-%M-%S")
+        timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
         output_directory = runs_directory / f"doppler_shift_{timestamp}"
 
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -398,6 +413,7 @@ def main(
         frequency_width,
         num_frequencies,
         spectrum_measurement_position,
+        batch_size,
     )
 
     end_time = perf_counter()
