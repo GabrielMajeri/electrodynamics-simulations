@@ -141,7 +141,9 @@ def compute_particle_trajectory(
         electric_field_second_term = (
             electric_field_common_term
             + view_direction
-            * jnp.expand_dims(gamma_factor + jnp.linalg.vecdot(view_direction, beta), axis=-1)
+            * jnp.expand_dims(
+                gamma_factor + jnp.linalg.vecdot(view_direction, beta), axis=-1
+            )
         ) / displacement_norm_squared
 
         n_cross_beta = jnp.cross(view_direction, beta)
@@ -223,6 +225,12 @@ def main(
             help="Overwrite last run instead of creating a new directory, indexed with the timestamp of the current run."
         ),
     ] = False,
+    exact_paraxial: Annotated[
+        bool,
+        typer.Option(
+            help="Use exact paraxial derivatives for longitudinal EM fields (`E_z`, `B_z`) instead of envelope-only approximation."
+        ),
+    ] = True,
 ) -> None:
     "Computes the trajectory and the scattered electric field for a single electron."
 
@@ -253,6 +261,7 @@ def main(
         waist_radius,
         radial_index,
         azimuthal_index,
+        exact_paraxial,
     )
     print("Laser parameters:", laser_parameters)
 

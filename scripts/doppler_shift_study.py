@@ -274,6 +274,12 @@ def main(
             help="Overwrite last run instead of creating a new directory, indexed with the timestamp of the current run."
         ),
     ] = False,
+    exact_paraxial: Annotated[
+        bool,
+        typer.Option(
+            help="Use exact paraxial derivatives for longitudinal EM fields (`E_z`, `B_z`) instead of envelope-only approximation."
+        ),
+    ] = True,
 ) -> None:
     """Simulates a Laguerre-Gauss laser pulse hitting a bunch of electrons moving at relativistic speeds.
     The scattered radiation is Doppler-shifted to much higher frequencies.
@@ -308,6 +314,7 @@ def main(
         waist_radius,
         radial_index,
         azimuthal_index,
+        exact_paraxial,
     )
 
     seed = 42
