@@ -337,3 +337,51 @@ def laguerre_polynomial_derivative(
     if n <= 0:
         return 0.0
     return -laguerre_polynomial(n - 1, alpha + 1, x)
+
+
+@jdc.jit
+def compute_directional_beam_fields(
+    parameters: jdc.Static[
+        LaserParameters | GaussianBeamParameters | LaguerreGaussBeamParameters
+    ],
+    position: jax.Array,
+    propagation_direction: jdc.Static[int] = 1,
+    focal_position: jdc.Static[float] = 0.0,
+    exact_paraxial: jdc.Static[bool] | None = None,
+) -> EMField:
+    """Computes electric and magnetic fields for a beam propagating in direction
+    s = propagation_direction (+1 for +z, -1 for -z) focused at focal_position z_focal.
+    """
+    assert propagation_direction in (1, -1), "propagation_direction must be +1 or -1"
+
+    if propagation_direction == 1 and focal_position == 0.0:
+        if isinstance(parameters, LaguerreGaussBeamParameters):
+            return compute_laguerre_gauss_beam_fields(
+                parameters, position, exact_paraxial
+            )
+        elif isinstance(parameters, GaussianBeamParameters):
+            return compute_gaussian_beam_fields(parameters, position, exact_paraxial)
+        else:
+            return compute_plane_wave_fields(parameters, position)
+
+    s = propagation_direction
+    ct, x, y, z = position.T
+    z_prime = s * (z - focal_position)
+    pos_prime = jnp.vstack([ct, x, y, z_prime]).T
+
+    if isinstance(parameters, LaguerreGaussBeamParameters):
+        em_prime = compute_laguerre_gauss_beam_fields(
+            parameters, pos_prime, exact_paraxial
+        )
+    elif isinstance(parameters, GaussianBeamParameters):
+        em_prime = compute_gaussian_beam_fields(parameters, pos_prime, exact_paraxial)
+    else:
+        em_prime = compute_plane_wave_fields(parameters, pos_prime)
+
+    E_p = em_prime.electric_field
+    B_p = em_prime.magnetic_field
+
+    E = jnp.vstack([E_p[:, 0], E_p[:, 1], s * E_p[:, 2]]).T
+    B = jnp.vstack([s * B_p[:, 0], s * B_p[:, 1], B_p[:, 2]]).T
+
+    return EMField(electric_field=E, magnetic_field=B)

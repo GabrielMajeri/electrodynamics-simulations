@@ -54,6 +54,7 @@ def compute_scattered_electric_and_magnetic_fields(
     initial_position: jax.Array,
     detector_position: jax.Array,
     include_second_order_terms: jdc.Static[bool] = False,
+    is_lab_time: jdc.Static[bool] = False,
 ) -> tuple[jax.Array, jax.Array]:
     """Computes the scattered electric/magnetic field from a moving charge,
     using the formulas for the Liénard-Wiechert potentials.
@@ -63,6 +64,7 @@ def compute_scattered_electric_and_magnetic_fields(
     # Note: momentum is 4-momentum u^\mu = (\gamma c, \gamma v) (with particle mass = 1 in atomic units).
     # Since trajectory integration is performed with respect to proper time \tau (d\tau = dt / \gamma),
     # the integration factor dt = \gamma d\tau absorbs \gamma so that \beta_code = particle_velocity / c = \gamma \beta.
+    # When is_lab_time is True, trajectory integration is in laboratory time t (dt), so \beta = v / c = (u / \gamma) / c.
     particle_velocity = momentum[:, 1:4]
     gamma_factor = jnp.expand_dims(momentum[:, 0] / c, axis=-1)
     initial_position = initial_position[:, 1:4]
@@ -87,8 +89,11 @@ def compute_scattered_electric_and_magnetic_fields(
         1j * frequency * (laboratory_time + displacement_norm / c)
     )
 
-    # \gamma \beta = u / c (scaled by dt/d\tau = \gamma for proper time integration)
-    beta = particle_velocity / c
+    if is_lab_time:
+        beta = (particle_velocity / gamma_factor) / c
+    else:
+        # \gamma \beta = u / c (scaled by dt/d\tau = \gamma for proper time integration)
+        beta = particle_velocity / c
 
     # ===== Electric field terms =====
     # Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))
@@ -118,7 +123,7 @@ def compute_scattered_electric_and_magnetic_fields(
             electric_field_common_term
             + view_direction
             * (
-                gamma_factor
+                (1.0 if is_lab_time else gamma_factor)
                 + jnp.expand_dims(jnp.linalg.vecdot(view_direction, beta), axis=-1)
             )
         ) / displacement_norm_squared

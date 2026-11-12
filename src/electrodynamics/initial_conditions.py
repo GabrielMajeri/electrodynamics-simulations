@@ -78,3 +78,61 @@ def generate_initial_particle_momenta_moving_in_direction(
     )
 
     return initial_momenta
+
+
+def generate_initial_positions_in_nanofiber(
+    generator: np.random.Generator,
+    fiber_radius: float,
+    fiber_length: float,
+    num_particles: int,
+    z_start: float = 0.0,
+) -> np.ndarray:
+    """Generates uniformly distributed points within a cylindrical nanofiber
+    of given radius and length, oriented along the z axis.
+    The fiber spans from z = z_start to z = z_start + fiber_length.
+    """
+    positions = np.zeros((num_particles, 3), dtype=np.float64)
+
+    radii = np.sqrt(generator.uniform(low=0.0, high=fiber_radius**2, size=num_particles))
+    angles = generator.uniform(low=0.0, high=2 * np.pi, size=num_particles)
+    zs = generator.uniform(low=z_start, high=z_start + fiber_length, size=num_particles)
+
+    positions[:, 0] = radii * np.cos(angles)
+    positions[:, 1] = radii * np.sin(angles)
+    positions[:, 2] = zs
+
+    return positions
+
+
+def generate_initial_positions_in_nanofiber_surface(
+    generator: np.random.Generator,
+    fiber_radius: float,
+    skin_depth: float,
+    fiber_length: float,
+    num_particles: int,
+    z_start: float = 0.0,
+) -> np.ndarray:
+    """Generates uniformly distributed points within the surface skin layer of a cylindrical nanofiber."""
+    positions = np.zeros((num_particles, 3), dtype=np.float64)
+    r_min = max(0.0, fiber_radius - skin_depth)
+
+    radii = np.sqrt(generator.uniform(low=r_min**2, high=fiber_radius**2, size=num_particles))
+    angles = generator.uniform(low=0.0, high=2 * np.pi, size=num_particles)
+    zs = generator.uniform(low=z_start, high=z_start + fiber_length, size=num_particles)
+
+    positions[:, 0] = radii * np.cos(angles)
+    positions[:, 1] = radii * np.sin(angles)
+    positions[:, 2] = zs
+
+    return positions
+
+
+def generate_initial_particle_momenta_at_rest(
+    num_particles: int, particle_mass: float
+) -> np.ndarray:
+    """Generates initial 4-momenta for particles at rest in the laboratory frame:
+    u^mu = (m * c, 0, 0, 0).
+    """
+    initial_momenta = np.zeros(shape=(num_particles, 4), dtype=np.float64)
+    initial_momenta[:, 0] = particle_mass * c
+    return initial_momenta

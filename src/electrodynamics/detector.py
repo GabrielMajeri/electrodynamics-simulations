@@ -27,14 +27,14 @@ def initialize_detector_positions_negative_z(
     """Initializes the positions for the 2D grid describing the simulated detector's pixels,
     lying at some point along the z axis and being parallel to the x-y plane.
     """
-    ys = np.linspace(
-        -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
-    )
     xs = np.linspace(
         -parameters.width / 2, parameters.width / 2, parameters.grid_size_x
     )
+    ys = np.linspace(
+        -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
+    )
 
-    grid_x, grid_y = np.meshgrid(xs, ys)
+    grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
     grid_z = np.full_like(grid_x, z_distance)
 
     return np.stack((grid_x, grid_y, grid_z), axis=-1).reshape(-1, 3)
@@ -46,14 +46,14 @@ def initialize_detector_positions(
     """Initializes the positions for the 2D grid describing the simulated detector's pixels,
     located at an arbitrary point in space, looking towards the given direction.
     """
-    ys = np.linspace(
-        -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
-    )
     xs = np.linspace(
         -parameters.width / 2, parameters.width / 2, parameters.grid_size_x
     )
+    ys = np.linspace(
+        -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
+    )
 
-    grid_x, grid_y = np.meshgrid(xs, ys)
+    grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
     grid_z = np.zeros_like(grid_x)
 
     positions_arr = np.stack((grid_x, grid_y, grid_z), axis=-1).reshape(-1, 3)

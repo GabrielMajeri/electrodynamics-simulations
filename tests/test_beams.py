@@ -148,3 +148,24 @@ def test_lg_exact_on_axis_field_hu_paper(jax_config) -> None:
     # Theoretical magnitude on axis: 2 * sqrt(2) * amp / (k * waist)
     expected_mag = (2.0 * math.sqrt(2.0) * amp) / (k * waist)
     np.testing.assert_allclose(abs(Ez_origin), expected_mag, rtol=1e-5)
+
+
+def test_directional_beam_fields(jax_config) -> None:
+    from electrodynamics.beams import LaserParameters, compute_directional_beam_fields
+
+    freq = 0.057
+    wavelength = (2 * math.pi * c) / freq
+    amp = 1.0
+    laser = LaserParameters(freq, wavelength, amp, Polarizations.LINEAR.value)
+
+    # Forward (+z)
+    pos = jnp.array([[0.0, 0.0, 0.0, 100.0]])
+    em_fwd = compute_directional_beam_fields(laser, pos, propagation_direction=1, focal_position=100.0)
+    np.testing.assert_allclose(em_fwd.electric_field[0, 0], amp, rtol=1e-5)
+
+    # Counter-propagating (-z): at t=1.0, wavefront moves to z = 100.0 - c*1.0
+    pos_back = jnp.array([[c * 1.0, 0.0, 0.0, 100.0 - c * 1.0]])
+    em_back = compute_directional_beam_fields(laser, pos_back, propagation_direction=-1, focal_position=100.0)
+    np.testing.assert_allclose(em_back.electric_field[0, 0], amp, rtol=1e-5)
+    # Check B_y has opposite sign for -z propagation
+    np.testing.assert_allclose(em_back.magnetic_field[0, 1], -amp / c, rtol=1e-5)

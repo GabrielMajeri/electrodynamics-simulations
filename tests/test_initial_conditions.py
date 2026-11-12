@@ -7,7 +7,10 @@ from electrodynamics.constants import (
     SPEED_OF_LIGHT as c,
 )
 from electrodynamics.initial_conditions import (
+    generate_initial_particle_momenta_at_rest,
     generate_initial_particle_momenta_moving_towards_laser,
+    generate_initial_positions_in_nanofiber,
+    generate_initial_positions_in_nanofiber_surface,
     generate_initial_positions_uniformly_on_disk,
     generate_initial_positions_uniformly_within_ball,
 )
@@ -54,3 +57,48 @@ def test_initial_momenta_energy_momentum_relation():
     # 4-momentum norm: u_0^2 - |u|^2 = (m * c)^2
     norm_sq = momenta[:, 0] ** 2 - np.sum(momenta[:, 1:] ** 2, axis=-1)
     np.testing.assert_allclose(norm_sq, (m_e * c) ** 2, rtol=1e-10)
+
+
+def test_initial_conditions_nanofiber():
+    rng = np.random.default_rng(42)
+    radius = 10.0
+    length = 100.0
+    n = 2000
+    pos = generate_initial_positions_in_nanofiber(rng, radius, length, n, z_start=15.0)
+
+    assert pos.shape == (n, 3)
+    # Check transverse radial bounds
+    radii = np.hypot(pos[:, 0], pos[:, 1])
+    assert np.all(radii <= radius)
+    # Check longitudinal bounds
+    assert np.all(pos[:, 2] >= 15.0)
+    assert np.all(pos[:, 2] <= 115.0)
+    # Check average is near center
+    assert abs(pos[:, 0].mean()) < 1.0
+    assert abs(pos[:, 1].mean()) < 1.0
+    assert abs(pos[:, 2].mean() - 65.0) < 5.0
+
+
+def test_initial_conditions_nanofiber_surface():
+    rng = np.random.default_rng(42)
+    radius = 10.0
+    skin = 2.0
+    length = 50.0
+    n = 1500
+    pos = generate_initial_positions_in_nanofiber_surface(rng, radius, skin, length, n, z_start=0.0)
+
+    assert pos.shape == (n, 3)
+    radii = np.hypot(pos[:, 0], pos[:, 1])
+    assert np.all(radii >= radius - skin - 1e-12)
+    assert np.all(radii <= radius + 1e-12)
+
+
+def test_initial_momenta_at_rest():
+    n = 50
+    momenta = generate_initial_particle_momenta_at_rest(n, m_e)
+    assert momenta.shape == (n, 4)
+    np.testing.assert_allclose(momenta[:, 0], m_e * c)
+    np.testing.assert_allclose(momenta[:, 1:], 0.0)
+    norm_sq = momenta[:, 0] ** 2 - np.sum(momenta[:, 1:] ** 2, axis=-1)
+    np.testing.assert_allclose(norm_sq, (m_e * c) ** 2, rtol=1e-10)
+

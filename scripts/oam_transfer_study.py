@@ -25,7 +25,9 @@ from electrodynamics.fields import (
     compute_scattered_electric_and_magnetic_fields,
 )
 from electrodynamics.initial_conditions import (
+    generate_initial_particle_momenta_at_rest,
     generate_initial_particle_momenta_moving_towards_laser,
+    generate_initial_positions_in_nanofiber,
     generate_initial_positions_uniformly_on_disk,
     generate_initial_positions_uniformly_within_ball,
 )
@@ -396,6 +398,12 @@ def main(
             help="Use exact paraxial derivatives for longitudinal EM fields (`E_z`, `B_z`) instead of envelope-only approximation."
         ),
     ] = True,
+    target_type: Annotated[
+        str,
+        typer.Option(
+            help="Geometry for initial electron distribution: 'disk', 'ball', or 'nanofiber'."
+        ),
+    ] = "disk",
 ) -> None:
     """Simulates a Laguerre-Gauss laser pulse hitting a bunch of electrons moving at relativistic speeds.
     The scattered radiation is Doppler-shifted to much higher frequencies.
@@ -431,27 +439,40 @@ def main(
     seed = 42
     generator = np.random.default_rng(seed)
 
-    print(f"Working with {num_electrons} electrons")
+    print(f"Working with {num_electrons} electrons (target geometry: {target_type})")
 
     disk_radius = 100 * laser_wavelength
 
-    initial_positions = generate_initial_positions_uniformly_on_disk(
-        generator, disk_radius, num_electrons
-    )
-
-    # ball_radius = disk_radius
-    # initial_positions = generate_initial_positions_uniformly_within_ball(
-    #     generator, ball_radius, num_electrons
-    # )
+    if target_type == "disk":
+        initial_positions_3d = generate_initial_positions_uniformly_on_disk(
+            generator, disk_radius, num_electrons
+        )
+    elif target_type == "ball":
+        initial_positions_3d = generate_initial_positions_uniformly_within_ball(
+            generator, disk_radius, num_electrons
+        )
+    elif target_type == "nanofiber":
+        fiber_radius = 0.5 * laser_wavelength
+        fiber_length = 15.0 * laser_wavelength
+        initial_positions_3d = generate_initial_positions_in_nanofiber(
+            generator, fiber_radius, fiber_length, num_electrons
+        )
+    else:
+        raise ValueError(
+            f"Unknown target_type '{target_type}'. Expected 'disk', 'ball', or 'nanofiber'."
+        )
 
     # Add a 0 on the first index to obtain position 4-vectors
     initial_positions = np.concatenate(
-        (np.zeros((num_electrons, 1), dtype=np.float64), initial_positions), axis=-1
+        (np.zeros((num_electrons, 1), dtype=np.float64), initial_positions_3d), axis=-1
     )
 
-    initial_momenta = generate_initial_particle_momenta_moving_towards_laser(
-        num_particles=num_electrons, gamma=gamma, particle_mass=m_e
-    )
+    if target_type == "nanofiber" and np.isclose(gamma, 1.0):
+        initial_momenta = generate_initial_particle_momenta_at_rest(num_electrons, m_e)
+    else:
+        initial_momenta = generate_initial_particle_momenta_moving_towards_laser(
+            num_particles=num_electrons, gamma=gamma, particle_mass=m_e
+        )
 
     initial_positions = jnp.asarray(initial_positions)
     initial_momenta = jnp.asarray(initial_momenta)
