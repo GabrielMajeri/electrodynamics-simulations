@@ -64,12 +64,18 @@ def compute_pulse_envelope(
     propagation_direction: jdc.Static[int] = 1,
     reference_position: jdc.Static[float] = 0.0,
     c: jdc.Static[float] = 137.036,
+    incidence_angle: jdc.Static[float] = 0.0,
 ) -> jax.Array:
     """Computes the scalar pulse envelope modulation at given 4-positions
-    for a pulse moving in direction propagation_direction (+1 or -1) relative to reference_position.
+    for a pulse moving in direction propagation_direction (+1 or -1) relative to reference_position,
+    optionally rotated by incidence_angle in the x-z plane.
     """
-    ct, _, _, z = position.T
-    phi = (ct - propagation_direction * (z - reference_position)) / c
+    ct, x, _, z = position.T
+    if incidence_angle == 0.0:
+        z_proj = z
+    else:
+        z_proj = x * jnp.sin(incidence_angle) + z * jnp.cos(incidence_angle)
+    phi = (ct - propagation_direction * (z_proj - reference_position)) / c
 
     if isinstance(pulse_parameters, CosineSquaredPulseParameters):
         return cosine_squared_envelope(

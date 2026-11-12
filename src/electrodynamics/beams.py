@@ -385,3 +385,61 @@ def compute_directional_beam_fields(
     B = jnp.vstack([s * B_p[:, 0], s * B_p[:, 1], B_p[:, 2]]).T
 
     return EMField(electric_field=E, magnetic_field=B)
+
+
+@jdc.jit
+def compute_oblique_beam_fields(
+    parameters: jdc.Static[
+        LaserParameters | GaussianBeamParameters | LaguerreGaussBeamParameters
+    ],
+    position: jax.Array,
+    incidence_angle: jdc.Static[float] = 0.0,
+    exact_paraxial: jdc.Static[bool] | None = None,
+) -> EMField:
+    """Computes electric and magnetic fields for a beam propagating in the x-z plane
+    at angle `incidence_angle` relative to the +z axis:
+    k_hat = (sin(theta), 0, cos(theta)).
+
+    When `incidence_angle == 0`, reduces identically to propagation along +z.
+    """
+    if incidence_angle == 0.0:
+        if isinstance(parameters, LaguerreGaussBeamParameters):
+            return compute_laguerre_gauss_beam_fields(
+                parameters, position, exact_paraxial
+            )
+        elif isinstance(parameters, GaussianBeamParameters):
+            return compute_gaussian_beam_fields(parameters, position, exact_paraxial)
+        else:
+            return compute_plane_wave_fields(parameters, position)
+
+    cos_t = jnp.cos(incidence_angle)
+    sin_t = jnp.sin(incidence_angle)
+
+    ct, x, y, z = position.T
+    x_b = x * cos_t - z * sin_t
+    y_b = y
+    z_b = x * sin_t + z * cos_t
+    pos_b = jnp.vstack([ct, x_b, y_b, z_b]).T
+
+    if isinstance(parameters, LaguerreGaussBeamParameters):
+        em_b = compute_laguerre_gauss_beam_fields(parameters, pos_b, exact_paraxial)
+    elif isinstance(parameters, GaussianBeamParameters):
+        em_b = compute_gaussian_beam_fields(parameters, pos_b, exact_paraxial)
+    else:
+        em_b = compute_plane_wave_fields(parameters, pos_b)
+
+    E_b = em_b.electric_field
+    B_b = em_b.magnetic_field
+
+    E_x = E_b[:, 0] * cos_t + E_b[:, 2] * sin_t
+    E_y = E_b[:, 1]
+    E_z = -E_b[:, 0] * sin_t + E_b[:, 2] * cos_t
+
+    B_x = B_b[:, 0] * cos_t + B_b[:, 2] * sin_t
+    B_y = B_b[:, 1]
+    B_z = -B_b[:, 0] * sin_t + B_b[:, 2] * cos_t
+
+    return EMField(
+        electric_field=jnp.vstack([E_x, E_y, E_z]).T,
+        magnetic_field=jnp.vstack([B_x, B_y, B_z]).T,
+    )

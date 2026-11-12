@@ -1,10 +1,58 @@
-from math import pi, sqrt
+from math import atan, atan2, cos, pi, sin, sqrt
 
 import jax
 import jax.numpy as jnp
 import jax_dataclasses as jdc
 
 from electrodynamics.constants import SPEED_OF_LIGHT as c
+
+
+def compute_relativistic_reflection_parameters(
+    gamma: float, incidence_angle: float = 0.0
+) -> tuple[float, float, float, float]:
+    """Computes the exact relativistic reflection parameters for a laser beam
+    impinging at angle `incidence_angle` (relative to the mirror normal) on a
+    relativistic flying mirror moving at speed `v = beta * c` towards the incoming beam,
+    following Chen et al., Scientific Reports 12:12524 (2022):
+
+    - In the flying mirror rest frame:
+        tan(theta'_in) = sin(theta_in) / (gamma * (cos(theta_in) + beta))
+        lambda'_0 = lambda_0 / (gamma * (1 + beta * cos(theta_in)))
+    - In the laboratory frame:
+        tan(theta_re) = sin(theta'_in) / (gamma * (cos(theta'_in) + beta))
+        lambda_1 = lambda'_0 / (gamma * (1 + beta * cos(theta'_in)))
+        doppler_factor = omega_1 / omega_0 = lambda_0 / lambda_1
+    - Profile tilt angle phi between reflected linear momentum and electric field profile:
+        sin(phi) / sin(phi + theta_in + theta_re) = beta * cos(theta_in) / cos(theta_re)
+
+    Returns:
+        (theta_in_mirror_frame, theta_re, doppler_factor, profile_tilt_angle)
+    """
+    if gamma < 1.0:
+        raise ValueError(f"gamma must satisfy gamma >= 1, got {gamma}")
+
+    beta = sqrt(1.0 - 1.0 / (gamma**2))
+
+    theta_in_prime = atan2(sin(incidence_angle), gamma * (cos(incidence_angle) + beta))
+    theta_re = atan2(sin(theta_in_prime), gamma * (cos(theta_in_prime) + beta))
+
+    doppler_factor = (
+        gamma
+        * (1.0 + beta * cos(incidence_angle))
+        * gamma
+        * (1.0 + beta * cos(theta_in_prime))
+    )
+
+    # Profile tilt angle phi from
+    #   sin(phi)/sin(phi + theta_in + theta_re) = beta * cos(theta_in) / cos(theta_re)
+    ratio = (beta * cos(incidence_angle)) / cos(theta_re)
+    total_angle = incidence_angle + theta_re
+    denom = 1.0 - ratio * cos(total_angle)
+    profile_tilt_angle = (
+        atan((ratio * sin(total_angle)) / denom) if abs(denom) > 1e-12 else 0.0
+    )
+
+    return theta_in_prime, theta_re, doppler_factor, profile_tilt_angle
 
 
 def compute_doppler_shift_factor(
@@ -55,9 +103,14 @@ def compute_scattered_electric_and_magnetic_fields(
     detector_position: jax.Array,
     include_second_order_terms: jdc.Static[bool] = False,
     is_lab_time: jdc.Static[bool] = False,
+    initial_momentum: jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array]:
     """Computes the scattered electric/magnetic field from a moving charge,
     using the formulas for the Liénard-Wiechert potentials.
+
+    When `initial_momentum` is provided, the unperturbed relativistic drift velocity
+    beta_0 = u_init / u^0_init is subtracted from beta(t) so that uniform coasting
+    outside the laser pulse produces zero spurious boundary-window radiation.
     """
     laboratory_time = jnp.expand_dims(position[:, 0], axis=-1) / c
     particle_position = position[:, 1:4]
@@ -84,16 +137,37 @@ def compute_scattered_electric_and_magnetic_fields(
     # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
     view_direction = displacement / displacement_norm
 
+    # Exact cancellation-free evaluation of t + |x - r(t)|/c:
+    # |x - r| = |x| + (-2 (x . r) + |r|^2) / (|x - r| + |x|)
+    detector_norm = jnp.expand_dims(
+        jnp.linalg.vector_norm(detector_position, axis=-1), axis=-1
+    )
+    r_squared = jnp.expand_dims(
+        jnp.sum(particle_position * particle_position, axis=-1), axis=-1
+    )
+    x_dot_r = jnp.expand_dims(
+        jnp.sum(detector_position * particle_position, axis=-1), axis=-1
+    )
+    delta_r = (-2.0 * x_dot_r + r_squared) / (displacement_norm + detector_norm + 1e-30)
+
     # exp(i * omega * (t + R(x_0, t)/c))
     oscillatory_kernel = jnp.exp(
-        1j * frequency * (laboratory_time + displacement_norm / c)
-    )
+        1j * frequency * (laboratory_time + delta_r / c)
+    ) * jnp.exp(1j * frequency * (detector_norm / c))
 
     if is_lab_time:
         beta = (particle_velocity / gamma_factor) / c
+        if initial_momentum is not None:
+            init_gamma = jnp.expand_dims(initial_momentum[:, 0] / c, axis=-1)
+            beta_0 = (initial_momentum[:, 1:4] / init_gamma) / c
+            beta = beta - beta_0
     else:
         # \gamma \beta = u / c (scaled by dt/d\tau = \gamma for proper time integration)
         beta = particle_velocity / c
+        if initial_momentum is not None:
+            init_gamma = jnp.expand_dims(initial_momentum[:, 0] / c, axis=-1)
+            beta_0 = (initial_momentum[:, 1:4] / init_gamma) / c
+            beta = beta - gamma_factor * beta_0
 
     # ===== Electric field terms =====
     # Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))

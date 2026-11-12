@@ -8,6 +8,7 @@ from electrodynamics.beams import (
     LaserParameters,
     compute_directional_beam_fields,
     compute_laguerre_gauss_beam_fields,
+    compute_oblique_beam_fields,
 )
 from electrodynamics.constants import (
     ELECTRON_CHARGE,
@@ -31,10 +32,16 @@ def compute_electric_and_magnetic_fields(
     position: jax.Array,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[GaussianPulseParameters],
+    incidence_angle: jdc.Static[float] = 0.0,
 ) -> tuple[jax.Array, jax.Array]:
-    ct, _, _, z = position.T
+    ct, x, _, z = position.T
 
-    phi = (ct - z) / SPEED_OF_LIGHT
+    if incidence_angle == 0.0:
+        z_proj = z
+    else:
+        z_proj = x * jnp.sin(incidence_angle) + z * jnp.cos(incidence_angle)
+
+    phi = (ct - z_proj) / SPEED_OF_LIGHT
     if isinstance(pulse_parameters, CosineSquaredPulseParameters):
         modulation = cosine_squared_envelope(
             phi, pulse_parameters.phi_0, pulse_parameters.tau_0
@@ -55,12 +62,14 @@ def compute_electric_and_magnetic_fields(
 
     modulation = jnp.expand_dims(modulation, axis=-1)
 
-    # electric_field, magnetic_field = compute_plane_wave_fields(
-    #     laser_parameters, position
-    # )
-    electric_field, magnetic_field = compute_laguerre_gauss_beam_fields(
-        laser_parameters, position
-    )
+    if incidence_angle == 0.0:
+        electric_field, magnetic_field = compute_laguerre_gauss_beam_fields(
+            laser_parameters, position
+        )
+    else:
+        electric_field, magnetic_field = compute_oblique_beam_fields(
+            laser_parameters, position, incidence_angle=incidence_angle
+        )
 
     electric_field = modulation * electric_field
     magnetic_field = modulation * magnetic_field
@@ -75,11 +84,13 @@ def integration_step_euler(
     time_step: float,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
+    incidence_angle: jdc.Static[float] = 0.0,
 ) -> tuple[jax.Array, jax.Array]:
     electric_field, magnetic_field = compute_electric_and_magnetic_fields(
         previous_position,
         laser_parameters,
         pulse_parameters,
+        incidence_angle,
     )
     acceleration = compute_acceleration_of_charged_particle_in_em_field(
         previous_momentum,
@@ -101,9 +112,10 @@ def compute_intermediate_acceleration(
     momentum: jax.Array,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
+    incidence_angle: jdc.Static[float] = 0.0,
 ) -> jax.Array:
     electric_field, magnetic_field = compute_electric_and_magnetic_fields(
-        position, laser_parameters, pulse_parameters
+        position, laser_parameters, pulse_parameters, incidence_angle=incidence_angle
     )
 
     return compute_acceleration_of_charged_particle_in_em_field(
@@ -121,6 +133,7 @@ def integration_step_rk4(
     time_step: float,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[PulseWithFlatPeakParameters],
+    incidence_angle: jdc.Static[float] = 0.0,
 ) -> tuple[jax.Array, jax.Array]:
     """Updates the particles' positions and momenta using
     a 4th order Runge-Kutta numerical integration scheme.
@@ -131,6 +144,7 @@ def integration_step_rk4(
         previous_momentum,
         laser_parameters,
         pulse_parameters,
+        incidence_angle=incidence_angle,
     )
 
     position_k_2 = time_step * (previous_momentum + momentum_k_1 / 2)
@@ -139,6 +153,7 @@ def integration_step_rk4(
         previous_momentum + momentum_k_1 / 2,
         laser_parameters,
         pulse_parameters,
+        incidence_angle=incidence_angle,
     )
 
     position_k_3 = time_step * (previous_momentum + momentum_k_2 / 2)
@@ -147,6 +162,7 @@ def integration_step_rk4(
         previous_momentum + momentum_k_2 / 2,
         laser_parameters,
         pulse_parameters,
+        incidence_angle=incidence_angle,
     )
 
     position_k_4 = time_step * (previous_momentum + momentum_k_3)
@@ -155,6 +171,7 @@ def integration_step_rk4(
         previous_momentum + momentum_k_3,
         laser_parameters,
         pulse_parameters,
+        incidence_angle=incidence_angle,
     )
 
     new_position = (
@@ -177,6 +194,7 @@ def compute_lab_time_derivatives(
     momentum: jax.Array,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[GaussianPulseParameters],
+    incidence_angle: jdc.Static[float] = 0.0,
 ) -> tuple[jax.Array, jax.Array]:
     """Computes the laboratory time derivatives d(position)/dt and d(momentum)/dt:
     d(position)/dt = (c, v_x, v_y, v_z)
@@ -184,7 +202,7 @@ def compute_lab_time_derivatives(
     where v = c * u / u^0 and du/dt = (q/m)*(E + v x B).
     """
     electric_field, magnetic_field = compute_electric_and_magnetic_fields(
-        position, laser_parameters, pulse_parameters
+        position, laser_parameters, pulse_parameters, incidence_angle=incidence_angle
     )
 
     u0 = momentum[..., 0:1]
@@ -214,10 +232,15 @@ def integration_step_rk4_lab_time(
     time_step: float,
     laser_parameters: jdc.Static[LaguerreGaussBeamParameters],
     pulse_parameters: jdc.Static[GaussianPulseParameters],
+    incidence_angle: jdc.Static[float] = 0.0,
 ) -> tuple[jax.Array, jax.Array]:
     """Updates particles' 4-positions and 4-momenta in laboratory time dt using 4th-order Runge-Kutta."""
     k1_pos, k1_mom = compute_lab_time_derivatives(
-        previous_position, previous_momentum, laser_parameters, pulse_parameters
+        previous_position,
+        previous_momentum,
+        laser_parameters,
+        pulse_parameters,
+        incidence_angle,
     )
 
     k2_pos, k2_mom = compute_lab_time_derivatives(
@@ -225,6 +248,7 @@ def integration_step_rk4_lab_time(
         previous_momentum + (time_step / 2) * k1_mom,
         laser_parameters,
         pulse_parameters,
+        incidence_angle,
     )
 
     k3_pos, k3_mom = compute_lab_time_derivatives(
@@ -232,6 +256,7 @@ def integration_step_rk4_lab_time(
         previous_momentum + (time_step / 2) * k2_mom,
         laser_parameters,
         pulse_parameters,
+        incidence_angle,
     )
 
     k4_pos, k4_mom = compute_lab_time_derivatives(
@@ -239,6 +264,7 @@ def integration_step_rk4_lab_time(
         previous_momentum + time_step * k3_mom,
         laser_parameters,
         pulse_parameters,
+        incidence_angle,
     )
 
     new_position = previous_position + (time_step / 6) * (

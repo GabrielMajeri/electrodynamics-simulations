@@ -518,10 +518,11 @@ def plot_detector_radiation_and_oam(
     dL_z: np.ndarray,
     laser_wavelength: float,
     title: str = "Scattered radiation and radiated OAM on detector",
+    wave_number: float | None = None,
 ) -> None:
     """Plots 2D detector patterns:
     1. Radiation intensity |E|^2
-    2. Optical vortex phase arg(E_x + i E_y)
+    2. Optical vortex phase arg(E_x) (optionally compensated for spherical wavefront curvature)
     3. Radiated orbital angular momentum density Re(dL_z)
 
     detector_positions: shape (Nx, Ny, 3)
@@ -546,13 +547,35 @@ def plot_detector_radiation_and_oam(
     axes[0].set_aspect("equal")
     fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
-    # 2. Transverse phase arg(E_x + i E_y) (helical vortex wavefront)
-    E_trans = electric_field[:, :, 0] + 1j * electric_field[:, :, 1]
-    phase = np.angle(E_trans)
+    # 2. Transverse vortex phase (helical wavefront)
+    # Use E_x when dominant (works for linear-x, RCP, and LCP without RCP cancellation),
+    # or E_y if E_x is zero (linear-y).
+    if (
+        np.max(np.abs(electric_field[:, :, 0]))
+        >= np.max(np.abs(electric_field[:, :, 1])) * 0.5
+    ):
+        E_comp = electric_field[:, :, 0]
+    else:
+        E_comp = electric_field[:, :, 1]
+
+    if wave_number is not None:
+        r_detector = np.linalg.norm(detector_positions, axis=-1)
+        r_center = abs(
+            float(
+                detector_positions[
+                    detector_positions.shape[0] // 2,
+                    detector_positions.shape[1] // 2,
+                    2,
+                ]
+            )
+        )
+        E_comp = E_comp * np.exp(-1j * wave_number * (r_detector - r_center))
+
+    phase = np.angle(E_comp)
     im1 = axes[1].imshow(
         phase.T, origin="lower", extent=extent, cmap="twilight", vmin=-np.pi, vmax=np.pi
     )
-    axes[1].set_title(r"Vortex Phase $\arg(E_x + i E_y)$")
+    axes[1].set_title(r"Vortex Phase $\arg(E_{\perp})$")
     axes[1].set_xlabel(r"$x / \lambda_0$")
     axes[1].set_ylabel(r"$y / \lambda_0$")
     axes[1].set_aspect("equal")
@@ -563,7 +586,7 @@ def plot_detector_radiation_and_oam(
     # 3. Radiated OAM density Re(dL_z)
     dL_z_real = np.real(dL_z)
     total_Lz = float(np.sum(dL_z_real))
-    vmax = max(float(np.max(np.abs(dL_z_real))), 1e-12)
+    vmax = max(float(np.max(np.abs(dL_z_real))), 1e-30)
     im2 = axes[2].imshow(
         dL_z_real.T, origin="lower", extent=extent, cmap="bwr", vmin=-vmax, vmax=vmax
     )

@@ -28,6 +28,7 @@ from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_at_rest,
     generate_initial_particle_momenta_moving_towards_laser,
     generate_initial_positions_in_nanofiber,
+    generate_initial_positions_on_thin_sheet,
     generate_initial_positions_uniformly_on_disk,
     generate_initial_positions_uniformly_within_ball,
 )
@@ -111,18 +112,6 @@ def integrate_particles(
     detector_electric_field = jax.lax.pcast(detector_electric_field, "i", to="varying")
     detector_magnetic_field = jax.lax.pcast(detector_magnetic_field, "i", to="varying")
 
-    compute_scattered_fields_for_all_frequencies = jax.vmap(
-        compute_scattered_electric_and_magnetic_fields,
-        in_axes=(0, None, None, None, None),
-        out_axes=1,
-    )
-
-    compute_scattered_fields_for_all_detector_positions = jax.vmap(
-        compute_scattered_electric_and_magnetic_fields,
-        in_axes=(None, None, None, None, 0),
-        out_axes=0,
-    )
-
     num_time_steps = int((end_time - start_time) / time_step) + 1
 
     def scan_fn(u: IterationState, _: None) -> tuple[IterationState, None]:
@@ -144,13 +133,18 @@ def integrate_particles(
             pulse_parameters,
         )
 
-        electric_field, magnetic_field = compute_scattered_fields_for_all_frequencies(
-            frequencies,
-            new_positions,
-            new_momenta,
-            initial_positions,
-            spectrum_measurement_position,
-        )
+        electric_field, magnetic_field = jax.vmap(
+            lambda frequency: compute_scattered_electric_and_magnetic_fields(
+                frequency,
+                new_positions,
+                new_momenta,
+                initial_positions,
+                spectrum_measurement_position,
+                initial_momentum=initial_momenta,
+            ),
+            in_axes=0,
+            out_axes=1,
+        )(frequencies)
         new_scattered_electric_field = (
             previous_scattered_electric_field + time_step * electric_field
         )
@@ -158,18 +152,18 @@ def integrate_particles(
             previous_scattered_magnetic_field + time_step * magnetic_field
         )
 
-        electric_field, magnetic_field = (
-            compute_scattered_fields_for_all_detector_positions(
+        electric_field, magnetic_field = jax.vmap(
+            lambda detector_positions: compute_scattered_electric_and_magnetic_fields(
                 central_frequency,
                 new_positions,
                 new_momenta,
                 initial_positions,
                 detector_positions,
-            )
-        )
-
-        electric_field = electric_field.sum(axis=-2)
-        magnetic_field = magnetic_field.sum(axis=-2)
+                initial_momentum=initial_momenta,
+            ),
+            in_axes=0,
+            out_axes=1,
+        )(detector_positions)
 
         new_detector_electric_field = (
             previous_detector_electric_field + time_step * electric_field
@@ -447,6 +441,13 @@ def main(
         initial_positions_3d = generate_initial_positions_uniformly_on_disk(
             generator, disk_radius, num_electrons
         )
+    elif target_type == "thin-sheet":
+        initial_positions_3d = generate_initial_positions_on_thin_sheet(
+            disk_radius=disk_radius,
+            num_particles=num_electrons,
+            sampling_method="random",
+            generator=generator,
+        )
     elif target_type == "ball":
         initial_positions_3d = generate_initial_positions_uniformly_within_ball(
             generator, disk_radius, num_electrons
@@ -459,7 +460,7 @@ def main(
         )
     else:
         raise ValueError(
-            f"Unknown target_type '{target_type}'. Expected 'disk', 'ball', or 'nanofiber'."
+            f"Unknown target_type '{target_type}'. Expected 'disk', 'thin-sheet', 'ball', or 'nanofiber'."
         )
 
     # Add a 0 on the first index to obtain position 4-vectors

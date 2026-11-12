@@ -11,6 +11,7 @@ from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_moving_towards_laser,
     generate_initial_positions_in_nanofiber,
     generate_initial_positions_in_nanofiber_surface,
+    generate_initial_positions_on_thin_sheet,
     generate_initial_positions_uniformly_on_disk,
     generate_initial_positions_uniformly_within_ball,
 )
@@ -85,7 +86,9 @@ def test_initial_conditions_nanofiber_surface():
     skin = 2.0
     length = 50.0
     n = 1500
-    pos = generate_initial_positions_in_nanofiber_surface(rng, radius, skin, length, n, z_start=0.0)
+    pos = generate_initial_positions_in_nanofiber_surface(
+        rng, radius, skin, length, n, z_start=0.0
+    )
 
     assert pos.shape == (n, 3)
     radii = np.hypot(pos[:, 0], pos[:, 1])
@@ -102,3 +105,21 @@ def test_initial_momenta_at_rest():
     norm_sq = momenta[:, 0] ** 2 - np.sum(momenta[:, 1:] ** 2, axis=-1)
     np.testing.assert_allclose(norm_sq, (m_e * c) ** 2, rtol=1e-10)
 
+
+def test_initial_conditions_thin_sheet_polar_grid() -> None:
+    radius = 25.0
+    n = 1024
+    positions = generate_initial_positions_on_thin_sheet(
+        disk_radius=radius,
+        num_particles=n,
+        z_center=12.5,
+        thickness=0.0,
+        sampling_method="polar-grid",
+    )
+    assert positions.shape == (n, 3)
+    np.testing.assert_allclose(positions[:, 2], 12.5)
+    radii = np.hypot(positions[:, 0], positions[:, 1])
+    assert np.all(radii <= radius)
+    # Azimuthal symmetry of polar-grid ensures exact cancellation of dipole moment
+    np.testing.assert_allclose(positions[:, 0].mean(), 0.0, atol=1e-12)
+    np.testing.assert_allclose(positions[:, 1].mean(), 0.0, atol=1e-12)
