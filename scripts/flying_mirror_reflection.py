@@ -1,7 +1,5 @@
-import json
 from datetime import UTC, datetime
 from math import cos, pi, radians, sin, sqrt
-from pathlib import Path
 from time import perf_counter
 from typing import Annotated, Literal
 
@@ -14,9 +12,18 @@ import typer
 from jax.sharding import PartitionSpec as P
 from rich import print
 
-from electrodynamics.angular_momentum import compute_angular_momentum_derivative
+from electrodynamics.angular_momentum import (
+    compute_angular_momentum_derivative,
+    compute_particle_angular_momentum_z,
+)
 from electrodynamics.beams import LaguerreGaussBeamParameters
-from electrodynamics.constants import ELECTRON_CHARGE, ELECTRON_MASS, SPEED_OF_LIGHT
+from electrodynamics.constants import (
+    DEFAULT_LASER_FREQUENCY,
+    ELECTRON_CHARGE,
+    ELECTRON_MASS,
+    HARTREE_TO_EV,
+    SPEED_OF_LIGHT,
+)
 from electrodynamics.detector import (
     DetectorParameters,
     initialize_detector_positions_reflected,
@@ -29,19 +36,22 @@ from electrodynamics.fields import (
 from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_moving_towards_laser,
     generate_initial_positions_on_thin_sheet,
+    to_position_four_vectors,
 )
 from electrodynamics.integrate import integration_step_rk4_lab_time
-from electrodynamics.jax import initialize_jax
+from electrodynamics.jax import initialize_jax, iterate_sharded_particle_batches
 from electrodynamics.plotting import (
     plot_angular_momentum_distribution,
     plot_detector_radiation_and_oam,
     plot_experimental_setup,
     plot_final_momentum_distribution,
     plot_scattered_radiation_spectrum,
+    save_detector_field_component_plots,
+    save_figure,
 )
-from electrodynamics.polarization import Polarizations
+from electrodynamics.polarization import get_polarization_by_name
 from electrodynamics.pulse import CosineSquaredPulseParameters
-from electrodynamics.serialization import ConfigurationEncoder
+from electrodynamics.serialization import prepare_output_directory, save_json
 
 c = SPEED_OF_LIGHT
 m_e = ELECTRON_MASS
@@ -83,31 +93,28 @@ def integrate_particles_flying_mirror(
 
     batch_size = len(initial_positions)
 
-    scattered_electric_field = jnp.zeros(
-        shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128
-    )
-    scattered_magnetic_field = jnp.zeros(
-        shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128
-    )
-
     scattered_electric_field = jax.lax.pcast(
-        scattered_electric_field, "i", to="varying"
+        jnp.zeros(shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
     scattered_magnetic_field = jax.lax.pcast(
-        scattered_magnetic_field, "i", to="varying"
+        jnp.zeros(shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
 
     num_detector_points = len(detector_positions)
-
-    detector_electric_field = jnp.zeros(
-        shape=(batch_size, num_detector_points, 3), dtype=jnp.complex128
+    detector_electric_field = jax.lax.pcast(
+        jnp.zeros(shape=(batch_size, num_detector_points, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
-    detector_magnetic_field = jnp.zeros(
-        shape=(batch_size, num_detector_points, 3), dtype=jnp.complex128
+    detector_magnetic_field = jax.lax.pcast(
+        jnp.zeros(shape=(batch_size, num_detector_points, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
-
-    detector_electric_field = jax.lax.pcast(detector_electric_field, "i", to="varying")
-    detector_magnetic_field = jax.lax.pcast(detector_magnetic_field, "i", to="varying")
 
     num_time_steps = round((end_time - start_time) / time_step)
 
@@ -250,92 +257,69 @@ def simulate_flying_mirror(
         "[bold blue]Integrating trajectories for thin electron sheet and computing coherent scattered field...[/bold blue]"
     )
 
-    num_devices = min(len(initial_positions), len(jax.devices()))
-    if len(initial_positions) % batch_size != 0:
-        raise ValueError(
-            f"Number of electrons ({len(initial_positions)}) must be divisible by batch_size ({batch_size})"
-        )
-    if batch_size % num_devices != 0:
-        raise ValueError(
-            f"Batch size ({batch_size}) must be divisible by number of devices ({num_devices})"
+    final_positions = []
+    final_momenta = []
+    scattered_electric_field_spectrum = jnp.zeros(
+        (num_frequencies, 3), dtype=jnp.complex128
+    )
+    scattered_magnetic_field_spectrum = jnp.zeros(
+        (num_frequencies, 3), dtype=jnp.complex128
+    )
+    detector_electric_field = jnp.zeros(
+        (len(detector_positions), 3), dtype=jnp.complex128
+    )
+    detector_magnetic_field = jnp.zeros(
+        (len(detector_positions), 3), dtype=jnp.complex128
+    )
+    detector_incoherent_intensity = jnp.zeros(
+        (len(detector_positions),), dtype=jnp.float64
+    )
+
+    for index, num_batches, batch_positions, batch_momenta in (
+        iterate_sharded_particle_batches(initial_positions, initial_momenta, batch_size)
+    ):
+        print(f"Batch #{index + 1}/{num_batches}")
+        (
+            batch_final_positions,
+            batch_final_momenta,
+            batch_scattered_electric_field_spectrum,
+            batch_scattered_magnetic_field_spectrum,
+            batch_detector_electric_field,
+            batch_detector_magnetic_field,
+        ) = integrate_particles_flying_mirror(
+            batch_positions,
+            batch_momenta,
+            start_time,
+            end_time,
+            time_step,
+            laser_parameters,
+            pulse_parameters,
+            incidence_angle,
+            central_frequency,
+            frequency_width,
+            num_frequencies,
+            spectrum_measurement_position,
+            detector_positions,
         )
 
-    mesh = jax.make_mesh((num_devices,), ("i",))
-    with jax.set_mesh(mesh):
-        num_batches = len(initial_positions) // batch_size
-
-        batches = zip(
-            jnp.split(initial_positions, num_batches, axis=0),
-            jnp.split(initial_momenta, num_batches, axis=0),
-        )
-
-        final_positions = []
-        final_momenta = []
-        scattered_electric_field_spectrum = jnp.zeros(
-            (num_frequencies, 3), dtype=jnp.complex128
-        )
-        scattered_magnetic_field_spectrum = jnp.zeros(
-            (num_frequencies, 3), dtype=jnp.complex128
-        )
-        detector_electric_field = jnp.zeros(
-            (len(detector_positions), 3), dtype=jnp.complex128
-        )
-        detector_magnetic_field = jnp.zeros(
-            (len(detector_positions), 3), dtype=jnp.complex128
-        )
-        detector_incoherent_intensity = jnp.zeros(
-            (len(detector_positions),), dtype=jnp.float64
-        )
-
-        for index, batch in enumerate(batches):
-            print(f"Batch #{index + 1}/{num_batches}")
-            batch_positions = jax.device_put(batch[0], P("i", None))
-            batch_momenta = jax.device_put(batch[1], P("i", None))
-
-            (
-                batch_final_positions,
-                batch_final_momenta,
-                batch_scattered_electric_field_spectrum,
-                batch_scattered_magnetic_field_spectrum,
-                batch_detector_electric_field,
-                batch_detector_magnetic_field,
-            ) = integrate_particles_flying_mirror(
-                batch_positions,
-                batch_momenta,
-                start_time,
-                end_time,
-                time_step,
-                laser_parameters,
-                pulse_parameters,
-                incidence_angle,
-                central_frequency,
-                frequency_width,
-                num_frequencies,
-                spectrum_measurement_position,
-                detector_positions,
-            )
-
-            final_positions.append(batch_final_positions.block_until_ready())
-            final_momenta.append(batch_final_momenta.block_until_ready())
-            scattered_electric_field_spectrum += jnp.sum(
-                batch_scattered_electric_field_spectrum, axis=0
-            ).block_until_ready()
-            scattered_magnetic_field_spectrum += jnp.sum(
-                batch_scattered_magnetic_field_spectrum, axis=0
-            ).block_until_ready()
-            detector_electric_field += jnp.sum(
-                batch_detector_electric_field, axis=0
-            ).block_until_ready()
-            detector_magnetic_field += jnp.sum(
-                batch_detector_magnetic_field, axis=0
-            ).block_until_ready()
-            detector_incoherent_intensity += jnp.sum(
-                jnp.sum(jnp.abs(batch_detector_electric_field) ** 2, axis=-1),
-                axis=0,
-            ).block_until_ready()
-
-        final_positions = jnp.concatenate(final_positions)
-        final_momenta = jnp.concatenate(final_momenta)
+        final_positions.append(batch_final_positions.block_until_ready())
+        final_momenta.append(batch_final_momenta.block_until_ready())
+        scattered_electric_field_spectrum += jnp.sum(
+            batch_scattered_electric_field_spectrum, axis=0
+        ).block_until_ready()
+        scattered_magnetic_field_spectrum += jnp.sum(
+            batch_scattered_magnetic_field_spectrum, axis=0
+        ).block_until_ready()
+        detector_electric_field += jnp.sum(
+            batch_detector_electric_field, axis=0
+        ).block_until_ready()
+        detector_magnetic_field += jnp.sum(
+            batch_detector_magnetic_field, axis=0
+        ).block_until_ready()
+        detector_incoherent_intensity += jnp.sum(
+            jnp.sum(jnp.abs(batch_detector_electric_field) ** 2, axis=-1),
+            axis=0,
+        ).block_until_ready()
 
     return FlyingMirrorResult(
         np.linspace(
@@ -343,19 +327,14 @@ def simulate_flying_mirror(
             central_frequency + frequency_width / 2,
             num_frequencies,
         ),
-        final_positions,
-        final_momenta,
+        jnp.concatenate(final_positions),
+        jnp.concatenate(final_momenta),
         scattered_electric_field_spectrum,
         scattered_magnetic_field_spectrum,
         detector_electric_field,
         detector_magnetic_field,
         detector_incoherent_intensity,
     )
-
-
-@jdc.jit
-def compute_angular_momentum(positions: jax.Array, momenta: jax.Array) -> jax.Array:
-    return positions[:, 1] * momenta[:, 2] - positions[:, 2] * momenta[:, 1]
 
 
 def main(
@@ -493,24 +472,13 @@ def main(
 
     initialize_jax()
 
-    # Incident laser parameters (~800 nm)
-    laser_frequency = 0.057
+    laser_frequency = DEFAULT_LASER_FREQUENCY
     laser_wavelength = (2 * pi * c) / laser_frequency
     laser_period = (2 * pi) / laser_frequency
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
     waist_radius = waist_radius_lambda * laser_wavelength
-
-    pol_map = {
-        "linear-x": Polarizations.LINEAR.value,
-        "right-circular": Polarizations.RIGHT_CIRCULAR.value,
-        "left-circular": Polarizations.LEFT_CIRCULAR.value,
-    }
-    if polarization_mode not in pol_map:
-        raise ValueError(
-            f"Unknown polarization_mode '{polarization_mode}'. Choose from {list(pol_map.keys())}"
-        )
-    polarization = pol_map[polarization_mode]
+    polarization, _ = get_polarization_by_name(polarization_mode)
 
     laser_parameters = LaguerreGaussBeamParameters(
         frequency=laser_frequency,
@@ -523,7 +491,6 @@ def main(
         exact_paraxial=exact_paraxial,
     )
 
-    # Relativistic flying mirror kinematics
     if gamma > 1.0:
         beta = sqrt(1.0 - 1.0 / (gamma**2))
     else:
@@ -538,7 +505,7 @@ def main(
     reflected_wavelength = laser_wavelength / doppler_factor
     reflected_wavelength_um = 0.8 / doppler_factor
     reflected_wavelength_nm = 800.0 / doppler_factor
-    photon_energy_ev = reflected_frequency * 27.211386
+    photon_energy_ev = reflected_frequency * HARTREE_TO_EV
 
     print(
         f"Flying mirror: beta = {beta:.6f}, gamma = {gamma:.4f}, incidence angle theta_in = {incidence_angle_deg:.1f} deg ({incidence_angle:.4f} rad)"
@@ -549,7 +516,6 @@ def main(
         f"(hbar*omega_1 = {photon_energy_ev:.2f} eV = {photon_energy_ev / 1000.0:.3f} keV)"
     )
 
-    # Generate thin electron sheet (flying mirror)
     generator = np.random.default_rng(seed)
     sheet_radius = sheet_radius_lambda * laser_wavelength
     sheet_thickness = sheet_thickness_lambda * laser_wavelength
@@ -572,9 +538,7 @@ def main(
         sampling_method=sampling_method,
         generator=generator,
     )
-    initial_positions = np.concatenate(
-        (np.zeros((num_electrons, 1), dtype=np.float64), initial_positions_3d), axis=-1
-    )
+    initial_positions = to_position_four_vectors(initial_positions_3d)
     initial_momenta = generate_initial_particle_momenta_moving_towards_laser(
         num_particles=num_electrons, gamma=gamma, particle_mass=m_e
     )
@@ -591,7 +555,6 @@ def main(
         f"(collision at t = {t_coll / laser_period:.2f} T_0, z = 0) with dt = T_0 / {steps_per_period}"
     )
 
-    # Far-field detector positioned along the reflected beam axis k_re_hat = (sin(theta_re), 0, -cos(theta_re))
     reflected_rayleigh_range = (pi * waist_radius**2) / reflected_wavelength
     detector_distance = max(
         detector_distance_lambda * laser_wavelength,
@@ -624,7 +587,6 @@ def main(
     )
     detector_positions_jnp = jnp.asarray(detector_positions_flat)
 
-    # Place spectrum observer on the reflected vortex ring peak (r' = w_det / sqrt(2))
     ring_peak_offset = (
         diffracted_beam_waist * sqrt(max(1, abs(azimuthal_index)) / 2.0)
         if azimuthal_index != 0
@@ -640,17 +602,13 @@ def main(
 
     frequency_width = frequency_window_percentage * reflected_frequency
 
-    runs_directory = Path("runs")
-    if run_tag:
-        output_directory = runs_directory / f"flying_mirror_{run_tag}"
-    elif overwrite:
-        angle_tag = f"theta{round(incidence_angle_deg)}"
-        output_directory = runs_directory / f"flying_mirror_{angle_tag}_latest"
-    else:
-        timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-        output_directory = runs_directory / f"flying_mirror_{timestamp}"
-
-    output_directory.mkdir(parents=True, exist_ok=True)
+    output_directory = prepare_output_directory(
+        "flying_mirror",
+        run_datetime,
+        overwrite=overwrite,
+        overwrite_suffix=f"theta{round(incidence_angle_deg)}_latest",
+        run_tag=run_tag,
+    )
 
     configuration = {
         "laser_parameters": laser_parameters,
@@ -679,8 +637,7 @@ def main(
         "time_delta": time_step,
         "spectrum_measurement_position": spectrum_measurement_position,
     }
-    with open(output_directory / "configuration.json", "w") as file:
-        json.dump(configuration, file, indent=2, cls=ConfigurationEncoder)
+    save_json(output_directory / "configuration.json", configuration)
 
     print("Plotting experimental setup")
     fig = plt.figure(figsize=(8, 5), dpi=300)
@@ -691,8 +648,7 @@ def main(
         detector_parameters,
         np.asarray(detector_positions_flat),
     )
-    fig.savefig(output_directory / "experimental_setup.png")
-    plt.close(fig)
+    save_figure(fig, output_directory / "experimental_setup")
 
     start_wall = perf_counter()
     result = simulate_flying_mirror(
@@ -714,7 +670,6 @@ def main(
     duration = perf_counter() - start_wall
     print(f"[bold green]Simulation completed in {duration:.2f} seconds![/bold green]")
 
-    # Final electron momentum and angular momentum distributions
     fig = plt.figure(dpi=200)
     plot_final_momentum_distribution(
         fig,
@@ -722,11 +677,10 @@ def main(
         waist_radius,
         np.asarray(result.final_momenta[:, 3]),
     )
-    fig.savefig(output_directory / "final_momenta.png")
-    plt.close(fig)
+    save_figure(fig, output_directory / "final_momenta")
 
     fig = plt.figure(dpi=200)
-    angular_momenta = compute_angular_momentum(
+    angular_momenta = compute_particle_angular_momentum_z(
         result.final_positions, result.final_momenta
     )
     plot_angular_momentum_distribution(
@@ -735,10 +689,8 @@ def main(
         waist_radius,
         np.asarray(angular_momenta),
     )
-    fig.savefig(output_directory / "final_angular_momenta.png")
-    plt.close(fig)
+    save_figure(fig, output_directory / "final_angular_momenta")
 
-    # Scattered electric field spectrum
     spec_E_np = np.asarray(result.scattered_electric_field_spectrum)
     spec_norms = np.linalg.vector_norm(spec_E_np, axis=-1)
     peak_freq_idx = int(np.argmax(spec_norms))
@@ -752,31 +704,28 @@ def main(
         result.frequencies,
         spec_E_np,
     )
-    fig.savefig(output_directory / "electric_field_spectrum.pdf")
-    fig.savefig(output_directory / "electric_field_spectrum.png")
-    plt.close(fig)
-
-    # Project detector fields into the local transverse frame of the reflected beam
-    det_E_lab_2d = np.asarray(result.detector_electric_field).reshape(
-        detector_parameters.grid_size_x, detector_parameters.grid_size_y, 3
+    save_figure(
+        fig, output_directory / "electric_field_spectrum", formats=("pdf", "png")
     )
-    det_B_lab_2d = np.asarray(result.detector_magnetic_field).reshape(
-        detector_parameters.grid_size_x, detector_parameters.grid_size_y, 3
+
+    det_E_lab_2d = detector_parameters.reshape_to_grid(
+        np.asarray(result.detector_electric_field)
+    )
+    det_B_lab_2d = detector_parameters.reshape_to_grid(
+        np.asarray(result.detector_magnetic_field)
     )
     det_E_local, det_B_local = project_fields_to_detector_frame(
         det_E_lab_2d, det_B_lab_2d, reflection_angle=theta_re
     )
 
-    # Compute radiated orbital angular momentum density dL_z on the detector
     dL_z = compute_angular_momentum_derivative(
         detector_local_coords_2d, det_E_local, reflected_frequency
     )
     total_radiated_Lz = float(np.sum(np.real(dL_z)))
 
-    # Coherent vs incoherent intensity analysis
     coherent_intensity_2d = np.sum(np.abs(det_E_local) ** 2, axis=-1)
-    incoherent_intensity_2d = np.asarray(result.detector_incoherent_intensity).reshape(
-        detector_parameters.grid_size_x, detector_parameters.grid_size_y
+    incoherent_intensity_2d = detector_parameters.reshape_to_grid(
+        np.asarray(result.detector_incoherent_intensity)
     )
     peak_coherent_intensity = float(np.max(coherent_intensity_2d))
     mean_incoherent_intensity = float(np.mean(incoherent_intensity_2d))
@@ -793,7 +742,6 @@ def main(
     )
     print(f"Total radiated OAM on detector L_z^EM = {total_radiated_Lz:.4e} a.u.")
 
-    # 3-panel detector plot: Intensity |E|^2, spherical-compensated Vortex Phase, and Radiated OAM density
     reflected_wavenumber = (2 * pi) / reflected_wavelength
     if photon_energy_ev >= 100.0:
         energy_label = f"\\hbar\\omega_1={photon_energy_ev / 1000.0:.2f}\\,\\mathrm{{keV}}, \\lambda_1={reflected_wavelength_nm:.2f}\\,\\mathrm{{nm}}"
@@ -812,61 +760,18 @@ def main(
         ),
         wave_number=reflected_wavenumber,
     )
-    fig.savefig(output_directory / "detector_radiation_and_oam.pdf")
-    fig.savefig(output_directory / "detector_radiation_and_oam.png")
-    plt.close(fig)
-
-    # Individual detector field component plots (matching oam_transfer_study.py style)
-    detector_extent: tuple[float, float, float, float] = (
-        (-detector_parameters.width / 2) / waist_radius,
-        (+detector_parameters.width / 2) / waist_radius,
-        (-detector_parameters.height / 2) / waist_radius,
-        (+detector_parameters.height / 2) / waist_radius,
+    save_figure(
+        fig, output_directory / "detector_radiation_and_oam", formats=("pdf", "png")
     )
 
-    for index, coordinate in enumerate(("x", "y", "z")):
-        fig, ax = plt.subplots(figsize=(7, 6), dpi=200)
-        fig.suptitle("Scattered electric field on detector")
-        ax.set_title(f"$E_{coordinate}$")
-        val = np.real(det_E_local[:, :, index]).T
-        vmax = max(float(np.max(np.abs(val))), 1e-15)
-        image = ax.imshow(
-            val,
-            cmap="bwr",
-            origin="lower",
-            extent=detector_extent,
-            vmin=-vmax,
-            vmax=vmax,
-        )
-        ax.set_xlabel("Detector $x/w_0$")
-        ax.set_ylabel("Detector $y/w_0$")
-        ax.grid()
-        fig.colorbar(image)
-        fig.tight_layout()
-        fig.savefig(output_directory / f"electric_field_{coordinate}.pdf")
-        fig.savefig(output_directory / f"electric_field_{coordinate}.png")
-        plt.close(fig)
-
-    fig, ax = plt.subplots(figsize=(7, 6), dpi=200)
-    fig.suptitle("Scattered electric field on detector")
-    ax.set_title("$|E|$")
-    e_norm = np.linalg.vector_norm(det_E_local, axis=-1).T
-    image = ax.imshow(
-        e_norm,
-        cmap="inferno",
-        origin="lower",
-        extent=detector_extent,
+    save_detector_field_component_plots(
+        output_directory,
+        det_E_local,
+        detector_parameters,
+        waist_radius,
+        formats=("pdf", "png"),
     )
-    ax.set_xlabel("Detector $x/w_0$")
-    ax.set_ylabel("Detector $y/w_0$")
-    ax.grid()
-    fig.colorbar(image)
-    fig.tight_layout()
-    fig.savefig(output_directory / "electric_field_norm.pdf")
-    fig.savefig(output_directory / "electric_field_norm.png")
-    plt.close(fig)
 
-    # Save arrays and summary
     np.save(output_directory / "detector_local_coords.npy", detector_local_coords_2d)
     np.save(output_directory / "detector_electric_field.npy", det_E_local)
     np.save(output_directory / "detector_magnetic_field.npy", det_B_local)
@@ -893,8 +798,9 @@ def main(
         "theoretical_photon_energy_kev": photon_energy_ev / 1000.0,
         "simulated_peak_wavelength_um": simulated_wavelength_um,
         "simulated_peak_wavelength_nm": simulated_wavelength_um * 1000.0,
-        "simulated_photon_energy_ev": simulated_peak_frequency * 27.211386,
-        "simulated_photon_energy_kev": (simulated_peak_frequency * 27.211386) / 1000.0,
+        "simulated_photon_energy_ev": simulated_peak_frequency * HARTREE_TO_EV,
+        "simulated_photon_energy_kev": (simulated_peak_frequency * HARTREE_TO_EV)
+        / 1000.0,
         "actual_detector_distance_lambda": actual_detector_distance_lambda,
         "theoretical_profile_tilt_angle_rad": profile_tilt_angle,
         "peak_coherent_intensity": peak_coherent_intensity,
@@ -904,8 +810,7 @@ def main(
         "num_electrons": num_electrons,
         "sampling_method": sampling_method,
     }
-    with open(output_directory / "flying_mirror_summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    save_json(output_directory / "flying_mirror_summary.json", summary)
 
     print(f"[bold green]Saved all plots and data to {output_directory}[/bold green]")
 

@@ -1,7 +1,5 @@
-import json
 from datetime import UTC, datetime
 from math import pi
-from pathlib import Path
 from time import perf_counter
 from typing import Annotated
 
@@ -14,8 +12,20 @@ import typer
 from jax.sharding import PartitionSpec as P
 from rich import print
 
+from electrodynamics.angular_momentum import compute_particle_angular_momentum_z
 from electrodynamics.beams import LaguerreGaussBeamParameters
-from electrodynamics.constants import ELECTRON_CHARGE, ELECTRON_MASS, SPEED_OF_LIGHT
+from electrodynamics.constants import (
+    DEFAULT_LASER_FREQUENCY,
+)
+from electrodynamics.constants import (
+    ELECTRON_CHARGE as q,
+)
+from electrodynamics.constants import (
+    ELECTRON_MASS as m_e,
+)
+from electrodynamics.constants import (
+    SPEED_OF_LIGHT as c,
+)
 from electrodynamics.detector import (
     DetectorParameters,
     initialize_detector_positions_negative_z,
@@ -31,22 +41,21 @@ from electrodynamics.initial_conditions import (
     generate_initial_positions_on_thin_sheet,
     generate_initial_positions_uniformly_on_disk,
     generate_initial_positions_uniformly_within_ball,
+    to_position_four_vectors,
 )
 from electrodynamics.integrate import integration_step_rk4
-from electrodynamics.jax import initialize_jax
+from electrodynamics.jax import initialize_jax, iterate_sharded_particle_batches
 from electrodynamics.plotting import (
     plot_angular_momentum_distribution,
     plot_experimental_setup,
     plot_final_momentum_distribution,
     plot_scattered_radiation_spectrum,
+    save_detector_field_component_plots,
+    save_figure,
 )
 from electrodynamics.polarization import Polarizations
 from electrodynamics.pulse import PulseWithFlatPeakParameters
-from electrodynamics.serialization import ConfigurationEncoder
-
-c = SPEED_OF_LIGHT
-m_e = ELECTRON_MASS
-q = ELECTRON_CHARGE
+from electrodynamics.serialization import prepare_output_directory, save_json
 
 type PulseParameters = PulseWithFlatPeakParameters
 
@@ -77,7 +86,6 @@ def integrate_particles(
     """Compute the trajectory and the scattered radiation from particles
     under the action of the laser pulse.
     """
-
     frequencies = jnp.linspace(
         central_frequency - frequency_width / 2,
         central_frequency + frequency_width / 2,
@@ -86,31 +94,28 @@ def integrate_particles(
 
     batch_size = len(initial_positions)
 
-    scattered_electric_field = jnp.zeros(
-        shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128
-    )
-    scattered_magnetic_field = jnp.zeros(
-        shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128
-    )
-
     scattered_electric_field = jax.lax.pcast(
-        scattered_electric_field, "i", to="varying"
+        jnp.zeros(shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
     scattered_magnetic_field = jax.lax.pcast(
-        scattered_magnetic_field, "i", to="varying"
+        jnp.zeros(shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
 
     num_detector_points = len(detector_positions)
-
-    detector_electric_field = jnp.zeros(
-        shape=(batch_size, num_detector_points, 3), dtype=jnp.complex128
+    detector_electric_field = jax.lax.pcast(
+        jnp.zeros(shape=(batch_size, num_detector_points, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
-    detector_magnetic_field = jnp.zeros(
-        shape=(batch_size, num_detector_points, 3), dtype=jnp.complex128
+    detector_magnetic_field = jax.lax.pcast(
+        jnp.zeros(shape=(batch_size, num_detector_points, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
-
-    detector_electric_field = jax.lax.pcast(detector_electric_field, "i", to="varying")
-    detector_magnetic_field = jax.lax.pcast(detector_magnetic_field, "i", to="varying")
 
     num_time_steps = int((end_time - start_time) / time_step) + 1
 
@@ -153,12 +158,12 @@ def integrate_particles(
         )
 
         electric_field, magnetic_field = jax.vmap(
-            lambda detector_positions: compute_scattered_electric_and_magnetic_fields(
+            lambda det_pos: compute_scattered_electric_and_magnetic_fields(
                 central_frequency,
                 new_positions,
                 new_momenta,
                 initial_positions,
-                detector_positions,
+                det_pos,
                 initial_momentum=initial_momenta,
             ),
             in_axes=0,
@@ -252,85 +257,62 @@ def simulate_trajectories(
 ) -> IntegrationResult:
     print("Integrating trajectory for all particles and computing scattered field")
 
-    num_devices = min(len(initial_positions), len(jax.devices()))
-    if len(initial_positions) % batch_size != 0:
-        raise ValueError(
-            f"Number of electrons ({len(initial_positions)}) must be divisible by batch_size ({batch_size})"
-        )
-    if batch_size % num_devices != 0:
-        raise ValueError(
-            f"Batch size ({batch_size}) must be divisible by number of devices ({num_devices})"
+    final_positions = []
+    final_momenta = []
+    scattered_electric_field_spectrum = jnp.zeros(
+        (num_frequencies, 3), dtype=jnp.complex128
+    )
+    scattered_magnetic_field_spectrum = jnp.zeros(
+        (num_frequencies, 3), dtype=jnp.complex128
+    )
+    detector_electric_field = jnp.zeros(
+        (len(detector_positions), 3), dtype=jnp.complex128
+    )
+    detector_magnetic_field = jnp.zeros(
+        (len(detector_positions), 3), dtype=jnp.complex128
+    )
+
+    for index, _num_batches, batch_positions, batch_momenta in (
+        iterate_sharded_particle_batches(initial_positions, initial_momenta, batch_size)
+    ):
+        print(f"Batch #{index}")
+        (
+            batch_final_positions,
+            batch_final_momenta,
+            batch_scattered_electric_field_spectrum,
+            batch_scattered_magnetic_field_spectrum,
+            batch_detector_electric_field,
+            batch_detector_magnetic_field,
+        ) = integrate_particles(
+            batch_positions,
+            batch_momenta,
+            start_time,
+            end_time,
+            time_step,
+            laser_parameters,
+            pulse_parameters,
+            central_frequency,
+            frequency_width,
+            num_frequencies,
+            spectrum_measurement_position,
+            detector_parameters,
+            detector_positions,
         )
 
-    mesh = jax.make_mesh((num_devices,), ("i",))
-    with jax.set_mesh(mesh):
-        num_batches = len(initial_positions) // batch_size
-
-        batches = zip(
-            jnp.split(initial_positions, num_batches, axis=0),
-            jnp.split(initial_momenta, num_batches, axis=0),
-        )
-
-        final_positions = []
-        final_momenta = []
-        scattered_electric_field_spectrum = jnp.zeros(
-            (num_frequencies, 3), dtype=jnp.complex128
-        )
-        scattered_magnetic_field_spectrum = jnp.zeros(
-            (num_frequencies, 3), dtype=jnp.complex128
-        )
-        detector_electric_field = jnp.zeros(
-            (len(detector_positions), 3), dtype=jnp.complex128
-        )
-        detector_magnetic_field = jnp.zeros(
-            (len(detector_positions), 3), dtype=jnp.complex128
-        )
-
-        for index, batch in enumerate(batches):
-            print(f"Batch #{index}")
-            batch_positions = jax.device_put(batch[0], P("i", None))
-            batch_momenta = jax.device_put(batch[1], P("i", None))
-
-            (
-                batch_final_positions,
-                batch_final_momenta,
-                batch_scattered_electric_field_spectrum,
-                batch_scattered_magnetic_field_spectrum,
-                batch_detector_electric_field,
-                batch_detector_magnetic_field,
-            ) = integrate_particles(
-                batch_positions,
-                batch_momenta,
-                start_time,
-                end_time,
-                time_step,
-                laser_parameters,
-                pulse_parameters,
-                central_frequency,
-                frequency_width,
-                num_frequencies,
-                spectrum_measurement_position,
-                detector_parameters,
-                detector_positions,
-            )
-
-            final_positions.append(batch_final_positions.block_until_ready())
-            final_momenta.append(batch_final_momenta.block_until_ready())
-            scattered_electric_field_spectrum += jnp.sum(
-                batch_scattered_electric_field_spectrum, axis=0
-            ).block_until_ready()
-            scattered_magnetic_field_spectrum += jnp.sum(
-                batch_scattered_magnetic_field_spectrum, axis=0
-            ).block_until_ready()
-            detector_electric_field += jnp.sum(
-                batch_detector_electric_field, axis=0
-            ).block_until_ready()
-            detector_magnetic_field += jnp.sum(
-                batch_detector_magnetic_field, axis=0
-            ).block_until_ready()
-
-        final_positions = jnp.concatenate(final_positions)
-        final_momenta = jnp.concatenate(final_momenta)
+        final_positions.append(batch_final_positions.block_until_ready())
+        final_momenta.append(batch_final_momenta.block_until_ready())
+        scattered_electric_field_spectrum += jnp.sum(
+            batch_scattered_electric_field_spectrum, axis=0
+        ).block_until_ready()
+        scattered_magnetic_field_spectrum += jnp.sum(
+            batch_scattered_magnetic_field_spectrum, axis=0
+        ).block_until_ready()
+        detector_electric_field += jnp.sum(
+            batch_detector_electric_field, axis=0
+        ).block_until_ready()
+        detector_magnetic_field += jnp.sum(
+            batch_detector_magnetic_field, axis=0
+        ).block_until_ready()
 
     return IntegrationResult(
         np.arange(start_time, end_time + 1e-10, time_step),
@@ -339,21 +321,13 @@ def simulate_trajectories(
             central_frequency + frequency_width / 2,
             num_frequencies,
         ),
-        final_positions,
-        final_momenta,
+        jnp.concatenate(final_positions),
+        jnp.concatenate(final_momenta),
         scattered_electric_field_spectrum,
         scattered_magnetic_field_spectrum,
         detector_electric_field,
         detector_magnetic_field,
     )
-
-
-@jdc.jit
-def compute_angular_momentum(positions: jax.Array, momenta: jax.Array) -> jax.Array:
-    # positions has components [ct, x, y, z] or [x, y, z]
-    # momenta has components [p0, px, py, pz]
-    # L_z = x * py - y * px
-    return positions[:, 1] * momenta[:, 2] - positions[:, 2] * momenta[:, 1]
 
 
 def main(
@@ -395,7 +369,7 @@ def main(
     target_type: Annotated[
         str,
         typer.Option(
-            help="Geometry for initial electron distribution: 'disk', 'ball', or 'nanofiber'."
+            help="Geometry for initial electron distribution: 'disk', 'thin-sheet', 'ball', or 'nanofiber'."
         ),
     ] = "disk",
 ) -> None:
@@ -404,15 +378,12 @@ def main(
 
     We compute the spectrum of the integrated radiation received on a rectangular detector positioned far-away from the particles.
     """
-
     run_datetime = datetime.now(UTC).astimezone()
     print(f"Started run at {run_datetime}")
 
     initialize_jax()
 
-    # Monochromatic laser
-    laser_frequency = 0.057
-    # ~800 nm, red light
+    laser_frequency = DEFAULT_LASER_FREQUENCY
     laser_wavelength = (2 * pi * c) / laser_frequency
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
@@ -432,7 +403,6 @@ def main(
 
     seed = 42
     generator = np.random.default_rng(seed)
-
     print(f"Working with {num_electrons} electrons (target geometry: {target_type})")
 
     disk_radius = 100 * laser_wavelength
@@ -463,10 +433,7 @@ def main(
             f"Unknown target_type '{target_type}'. Expected 'disk', 'thin-sheet', 'ball', or 'nanofiber'."
         )
 
-    # Add a 0 on the first index to obtain position 4-vectors
-    initial_positions = np.concatenate(
-        (np.zeros((num_electrons, 1), dtype=np.float64), initial_positions_3d), axis=-1
-    )
+    initial_positions = to_position_four_vectors(initial_positions_3d)
 
     if target_type == "nanofiber" and np.isclose(gamma, 1.0):
         initial_momenta = generate_initial_particle_momenta_at_rest(num_electrons, m_e)
@@ -478,11 +445,9 @@ def main(
     initial_positions = jnp.asarray(initial_positions)
     initial_momenta = jnp.asarray(initial_momenta)
 
-    ### Pulse parameters ###
     tau_0 = (10 * np.pi) / laser_frequency
     phi_0 = 5 * tau_0
     peak_duration_periods = 10
-
     pulse_parameters = PulseWithFlatPeakParameters(phi_0, tau_0, peak_duration_periods)
 
     integration_start_time = 0.0
@@ -497,7 +462,6 @@ def main(
     )
 
     doppler_shift_factor = compute_doppler_shift_factor(gamma, m_e, q, a_0)
-
     central_frequency = laser_parameters.frequency * doppler_shift_factor
     print(f"Looking around Fourier frequency omega = {central_frequency}")
 
@@ -512,10 +476,9 @@ def main(
     )
     z_distance = -25_000 * laser_wavelength
 
-    detector_positions = initialize_detector_positions_negative_z(
-        detector_parameters, z_distance
+    detector_positions = jnp.asarray(
+        initialize_detector_positions_negative_z(detector_parameters, z_distance)
     )
-    detector_positions = jnp.asarray(detector_positions)
 
     spectrum_measurement_position = jnp.array(
         (
@@ -525,15 +488,9 @@ def main(
         )
     )
 
-    runs_directory = Path("runs")
-
-    if overwrite:
-        output_directory = runs_directory / "oam_transfer_latest"
-    else:
-        timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-        output_directory = runs_directory / f"oam_transfer_{timestamp}"
-
-    output_directory.mkdir(parents=True, exist_ok=True)
+    output_directory = prepare_output_directory(
+        "oam_transfer", run_datetime, overwrite=overwrite
+    )
 
     print("Saving run configuration")
     configuration = {
@@ -548,17 +505,10 @@ def main(
         "spectrum_measurement_position_in_multiples_of_lambda": spectrum_measurement_position
         / laser_wavelength,
     }
-
-    with open(output_directory / "configuration.json", "w") as file:
-        json.dump(configuration, file, indent=2, cls=ConfigurationEncoder)
-
-    plots_directory = output_directory
+    save_json(output_directory / "configuration.json", configuration)
 
     print("Plotting experimental setup")
-
-    # Plot experimental layout
     fig = plt.figure(figsize=(8, 5), dpi=300)
-
     plot_experimental_setup(
         fig,
         np.asarray(initial_positions),
@@ -566,8 +516,7 @@ def main(
         detector_parameters,
         np.asarray(detector_positions),
     )
-
-    fig.savefig(plots_directory / "experimental_setup.png")
+    save_figure(fig, output_directory / "experimental_setup")
 
     print("Starting simulation")
     start_time = perf_counter()
@@ -590,115 +539,50 @@ def main(
     )
 
     end_time = perf_counter()
-    duration = end_time - start_time
-    print(f"Took {duration} seconds")
+    print(f"Took {end_time - start_time} seconds")
 
     print("Plotting results")
 
-    ### Sample trajectory
-    ### Final z-momentum distribution
     fig = plt.figure(dpi=200)
-
     plot_final_momentum_distribution(
         fig,
         np.asarray(initial_positions[:, 1:4]),
         waist_radius,
         np.asarray(result.final_momenta[:, 3]),
     )
+    save_figure(fig, output_directory / "final_momenta")
 
-    fig.savefig(plots_directory / "final_momenta.png")
-
-    ### Final angular momentum distribution
     fig = plt.figure(dpi=200)
-
-    angular_momenta = compute_angular_momentum(
+    angular_momenta = compute_particle_angular_momentum_z(
         result.final_positions, result.final_momenta
     )
-
     plot_angular_momentum_distribution(
         fig,
         np.asarray(initial_positions[:, 1:4]),
         waist_radius,
         np.asarray(angular_momenta),
     )
+    save_figure(fig, output_directory / "final_angular_momenta")
 
-    fig.savefig(plots_directory / "final_angular_momenta.png")
-
-    ### Scattered electric field spectrum
     fig = plt.figure(dpi=200)
-
     plot_scattered_radiation_spectrum(
         fig,
         central_frequency,
         result.frequencies,
         np.asarray(result.scattered_electric_field_spectrum),
     )
+    save_figure(fig, output_directory / "electric_field_spectrum", formats=("pdf",))
 
-    fig.savefig(plots_directory / "electric_field_spectrum.pdf")
-
-    ### Electric/magnetic fields on detector screen
-    detector_extent: tuple[float, float, float, float] = (
-        (-detector_parameters.width / 2) / waist_radius,
-        (+detector_parameters.width / 2) / waist_radius,
-        (-detector_parameters.height / 2) / waist_radius,
-        (+detector_parameters.height / 2) / waist_radius,
+    detector_electric_field = detector_parameters.reshape_to_grid(
+        np.asarray(result.detector_electric_field)
     )
-
-    detector_electric_field = result.detector_electric_field.reshape(
-        detector_parameters.grid_size_y, detector_parameters.grid_size_x, -1
+    save_detector_field_component_plots(
+        output_directory,
+        detector_electric_field,
+        detector_parameters,
+        waist_radius,
+        formats=("pdf",),
     )
-
-    for index, coordinate in enumerate(("x", "y", "z")):
-        fig, ax = plt.subplots(figsize=(7, 6), dpi=200)
-
-        fig.suptitle("Scattered electric field on detector")
-
-        ax.set_title(f"$E_{coordinate}$")
-
-        image = ax.imshow(
-            np.real(detector_electric_field[:, :, index]),
-            cmap="bwr",
-            extent=detector_extent,
-        )
-
-        # Uncomment to see where the frequency spectrum gets computed:
-        # ax.scatter(
-        #     spectrum_measurement_position[0] / waist_radius,
-        #     spectrum_measurement_position[1] / waist_radius,
-        #     marker="x",
-        #     c="green",
-        #     s=50,
-        # )
-
-        ax.set_xlabel("Detector $x/w_0$")
-        ax.set_ylabel("Detector $y/w_0$")
-        ax.grid()
-
-        fig.colorbar(image)
-
-        fig.tight_layout()
-        fig.savefig(plots_directory / f"electric_field_{coordinate}.pdf")
-
-    fig, ax = plt.subplots(figsize=(7, 6), dpi=200)
-
-    fig.suptitle("Scattered electric field on detector")
-
-    ax.set_title("$|E|$")
-
-    image = ax.imshow(
-        np.linalg.vector_norm(detector_electric_field[:, :, :], axis=-1),
-        cmap="bwr",
-        extent=detector_extent,
-    )
-
-    ax.set_xlabel("Detector $x$")
-    ax.set_ylabel("Detector $y$")
-    ax.grid()
-
-    fig.colorbar(image)
-
-    fig.tight_layout()
-    fig.savefig(plots_directory / "electric_field_norm.pdf")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,33 @@
+from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle, FancyArrowPatch
 from mpl_toolkits.mplot3d import Axes3D, proj3d
 
+from electrodynamics.angular_momentum import compute_particle_angular_momentum_z
+from electrodynamics.constants import ELECTRON_REST_ENERGY_MEV, SPEED_OF_LIGHT
 from electrodynamics.detector import DetectorParameters
+
+if TYPE_CHECKING:
+    from electrodynamics.integrate import SnapshotData
+
+
+def save_figure(
+    fig: Figure,
+    stem: Path,
+    formats: Sequence[str] = ("png",),
+    close: bool = True,
+) -> None:
+    "Saves `fig` to `{stem}.{ext}` for each extension in `formats` and optionally closes it."
+    for ext in formats:
+        fig.savefig(stem.with_suffix(f".{ext}"))
+    if close:
+        plt.close(fig)
 
 
 class Arrow3D(FancyArrowPatch):
@@ -75,10 +98,8 @@ def plot_experimental_setup(
     ax = fig.add_subplot(1, 2, 1, projection="3d")
     ax.set_title("Initial positions and momenta")
 
-    # Draw the electrons
     ax.scatter3D(positions[:, 0], positions[:, 1], positions[:, 2], s=3)  # pyright: ignore[reportArgumentType]
 
-    # Draw initial momenta as arrows
     ax.quiver(
         positions[:, 0],
         positions[:, 1],
@@ -92,37 +113,23 @@ def plot_experimental_setup(
         color="orange",
     )
 
-    # ax.set_zlim(-10, 10)
-
     ax = fig.add_subplot(1, 2, 2, projection="3d", computed_zorder=False)
     ax.set_title("Detector, laser beam and particles")
 
-    # Draw electrons again
     ax.scatter3D(positions[:, 0], positions[:, 1], positions[:, 2], s=3)  # pyright: ignore[reportArgumentType]
 
-    # Draw the detector mesh
-    detector_xs = detector_positions[:, 0].reshape(
-        detector_parameters.grid_size_y, detector_parameters.grid_size_x
-    )
-    detector_ys = detector_positions[:, 1].reshape(
-        detector_parameters.grid_size_y, detector_parameters.grid_size_x
-    )
-    detector_zs = detector_positions[:, 2].reshape(
-        detector_parameters.grid_size_y, detector_parameters.grid_size_x
-    )
+    detector_grid = detector_parameters.reshape_to_grid(detector_positions)
 
-    # Plot as a surface mesh
     ax.plot_surface(
-        detector_xs,
-        detector_ys,
-        detector_zs,
+        detector_grid[:, :, 0],
+        detector_grid[:, :, 1],
+        detector_grid[:, :, 2],
         edgecolor="royalblue",
         lw=0.5,
         alpha=0.3,
         zorder=1,
     )
 
-    # Plot laser direction as an arrow
     detector_z = detector_positions[0, 2]
     laser_beam_direction_arrow = Arrow3D(
         (0, 0),
@@ -136,7 +143,48 @@ def plot_experimental_setup(
     )
     ax.add_artist(laser_beam_direction_arrow)
 
-    # fig.tight_layout()
+
+def _plot_normalized_transverse_distribution(
+    fig: Figure,
+    initial_positions: np.ndarray,
+    waist_radius: float,
+    values: np.ndarray,
+    title: str,
+    with_title: bool = True,
+) -> None:
+    ax = fig.add_subplot()
+
+    if with_title:
+        ax.set_title(title)
+
+    max_abs = np.abs(values).max()
+    if max_abs > 0:
+        values = values / max_abs
+
+    masked_values = np.ma.masked_where(np.abs(values) < 1e-2, values)
+    masked_positions = np.ma.masked_array(
+        initial_positions,
+        mask=np.repeat(np.ma.getmaskarray(masked_values).reshape(-1, 1), 3, axis=1),
+    )
+
+    compressed_values = np.ma.compress_nd(masked_values, axis=0)
+    compressed_positions = np.ma.compress_nd(masked_positions, axis=0)
+
+    p = ax.scatter(
+        compressed_positions[:, 0] / waist_radius,
+        compressed_positions[:, 1] / waist_radius,
+        c=compressed_values,
+        cmap="bwr",
+        s=3,
+    )
+
+    fig.colorbar(p)
+
+    ax.set_xlabel("$x/w_0$")
+    ax.set_ylabel("$y/w_0$")
+    ax.set_aspect(1)
+    ax.grid()
+    fig.tight_layout()
 
 
 def plot_final_momentum_distribution(
@@ -146,41 +194,14 @@ def plot_final_momentum_distribution(
     momenta: np.ndarray,
     with_title: bool = True,
 ) -> None:
-    ax = fig.add_subplot()
-
-    if with_title:
-        ax.set_title("Normalized $z$ momentum distribution")
-
-    momenta = momenta / np.abs(momenta).max()
-
-    momenta = np.ma.masked_where(np.abs(momenta) < 1e-2, momenta)
-
-    initial_positions = np.ma.masked_array(
+    _plot_normalized_transverse_distribution(
+        fig,
         initial_positions,
-        mask=np.repeat(np.ma.getmaskarray(momenta).reshape(-1, 1), 3, axis=1),
+        waist_radius,
+        momenta,
+        title="Normalized $z$ momentum distribution",
+        with_title=with_title,
     )
-
-    momenta = np.ma.compress_nd(momenta, axis=0)
-    initial_positions = np.ma.compress_nd(initial_positions, axis=0)
-
-    p = ax.scatter(
-        initial_positions[:, 0] / waist_radius,
-        initial_positions[:, 1] / waist_radius,
-        c=momenta,
-        cmap="bwr",
-        s=3,
-    )
-
-    fig.colorbar(p)
-
-    ax.set_xlabel("$x/w_0$")
-    ax.set_ylabel("$y/w_0$")
-
-    ax.set_aspect(1)
-
-    ax.grid()
-
-    fig.tight_layout()
 
 
 def plot_angular_momentum_distribution(
@@ -190,42 +211,14 @@ def plot_angular_momentum_distribution(
     momenta: np.ndarray,
     with_title: bool = True,
 ) -> None:
-    ax = fig.add_subplot()
-
-    if with_title:
-        ax.set_title("Normalized angular momentum distribution")
-
-    momenta = momenta / np.abs(momenta).max()
-
-    momenta = np.ma.masked_where(np.abs(momenta) < 1e-2, momenta)
-    initial_positions = np.ma.masked_array(
+    _plot_normalized_transverse_distribution(
+        fig,
         initial_positions,
-        mask=np.repeat(np.ma.getmaskarray(momenta).reshape(-1, 1), 3, axis=1),
+        waist_radius,
+        momenta,
+        title="Normalized angular momentum distribution",
+        with_title=with_title,
     )
-
-    momenta = np.ma.compress_nd(momenta, axis=0)
-    initial_positions = np.ma.compress_nd(initial_positions, axis=0)
-
-    p = ax.scatter(
-        initial_positions[:, 0] / waist_radius,
-        initial_positions[:, 1] / waist_radius,
-        c=momenta,
-        cmap="bwr",
-        s=3,
-    )
-
-    # ax.pcolormesh(Z, R, np.real(electric_field), vmin=-1, vmax=1.0, cmap="coolwarm")
-
-    fig.colorbar(p)
-
-    ax.set_xlabel("$x/w_0$")
-    ax.set_ylabel("$y/w_0$")
-
-    ax.set_aspect(1)
-
-    ax.grid()
-
-    fig.tight_layout()
 
 
 def plot_scattered_radiation_spectrum(
@@ -235,8 +228,6 @@ def plot_scattered_radiation_spectrum(
     spectrum: np.ndarray,
 ) -> None:
     axes = fig.subplots(2, 2)
-
-    # Plot norm of complex vector and absolute values of components
 
     values = (
         np.asarray(np.linalg.vector_norm(spectrum, axis=-1)),
@@ -253,12 +244,9 @@ def plot_scattered_radiation_spectrum(
         ax: Axes = axes[row, column]
 
         ax.plot(frequencies, values[index])
-
         ax.axvline(central_frequency, linestyle="--", color="orange")
-
         ax.set_xlabel("Frequency $\\omega$")
         ax.set_ylabel("Amplitude")
-
         ax.set_title(f"${labels[index]}$")
         ax.grid()
 
@@ -277,14 +265,9 @@ def plot_microbunching_spatial_distribution(
     along the laser propagation axis (z) and radial confinement (r).
     """
     if positions.shape[-1] == 4:
-        # Extract x, y, z
-        x = positions[:, 1]
-        y = positions[:, 2]
-        z = positions[:, 3]
+        x, y, z = positions[:, 1], positions[:, 2], positions[:, 3]
     else:
-        x = positions[:, 0]
-        y = positions[:, 1]
-        z = positions[:, 2]
+        x, y, z = positions[:, 0], positions[:, 1], positions[:, 2]
 
     r = np.hypot(x, y)
     z_norm = z / laser_wavelength
@@ -294,10 +277,8 @@ def plot_microbunching_spatial_distribution(
     axes = fig.subplots(1, 2)
     fig.suptitle(title)
 
-    # Subplot 1: (z, r) scatter with nanofiber region
     ax0: Axes = axes[0]
     ax0.set_title("Electron positions $(z, r)$")
-    # Draw nanofiber bounds
     fiber_z = [
         0,
         fiber_length / laser_wavelength,
@@ -313,14 +294,12 @@ def plot_microbunching_spatial_distribution(
         0,
     ]
     ax0.plot(fiber_z, fiber_r, color="green", linestyle="--", label="Nanofiber outline")
-
     ax0.scatter(z_norm, r_norm, s=4, alpha=0.6, color="red", label="Electrons")
     ax0.set_xlabel("$z / \\lambda_0$")
     ax0.set_ylabel("$r / \\lambda_0$")
     ax0.grid(True)
     ax0.legend(loc="upper right")
 
-    # Subplot 2: Longitudinal density histogram dN/dz
     ax1: Axes = axes[1]
     ax1.set_title("Longitudinal density $dN/dz$")
     z_min, z_max = z_norm.min(), z_norm.max()
@@ -349,9 +328,9 @@ def plot_bunch_phase_space(
 
     scatter = ax.scatter(
         z / laser_wavelength,
-        pz / 137.036,  # Normalized by m_e * c (since m_e = 1, c = 137.036)
+        pz / SPEED_OF_LIGHT,
         s=4,
-        c=momenta[:, 0] / 137.036,  # Color by relativistic gamma
+        c=momenta[:, 0] / SPEED_OF_LIGHT,
         cmap="plasma",
         alpha=0.7,
     )
@@ -388,7 +367,6 @@ def plot_transverse_bunch_profile(
     )
     fig.colorbar(scatter, label="$r / \\lambda_0$")
 
-    # Draw waist circle
     waist_circle = Circle(
         (0, 0),
         waist_radius / laser_wavelength,
@@ -413,9 +391,8 @@ def plot_energy_spectrum(
     title: str = "Electron kinetic energy spectrum",
 ) -> None:
     """Plots kinetic energy spectrum in MeV."""
-    # In atomic units, rest mass m_e * c^2 = 137.036^2 a.u. = 0.5109989 MeV
-    gamma = momenta[:, 0] / 137.036
-    kinetic_energy_mev = (gamma - 1.0) * 0.5109989
+    gamma = momenta[:, 0] / SPEED_OF_LIGHT
+    kinetic_energy_mev = (gamma - 1.0) * ELECTRON_REST_ENERGY_MEV
 
     ax = fig.add_subplot()
     fig.suptitle(title)
@@ -446,15 +423,14 @@ def plot_transverse_velocity_vortex(
     y = positions[:, 2] if positions.shape[-1] == 4 else positions[:, 1]
     px = momenta[:, 1]
     py = momenta[:, 2]
-    gamma = momenta[:, 0] / 137.036
+    gamma = momenta[:, 0] / SPEED_OF_LIGHT
 
-    vx = (px / gamma) / 137.036  # v_x / c
-    vy = (py / gamma) / 137.036  # v_y / c
+    vx = (px / gamma) / SPEED_OF_LIGHT
+    vy = (py / gamma) / SPEED_OF_LIGHT
 
     ax = fig.add_subplot()
     fig.suptitle(title)
 
-    # Subsample if many particles
     n = len(x)
     if n > 512:
         idx = np.random.default_rng(42).choice(n, size=512, replace=False)
@@ -462,8 +438,7 @@ def plot_transverse_velocity_vortex(
     else:
         x_sub, y_sub, vx_sub, vy_sub = x, y, vx, vy
 
-    # Azimuthal momentum / angular momentum per particle
-    L_z = x * py - y * px
+    L_z = compute_particle_angular_momentum_z(positions, momenta)
 
     scatter = ax.scatter(
         x / laser_wavelength,
@@ -533,12 +508,10 @@ def plot_detector_radiation_and_oam(
     axes = fig.subplots(1, 3)
     fig.suptitle(title, fontsize=12)
 
-    # Coordinates in units of laser wavelength
     xs = detector_positions[:, 0, 0] / laser_wavelength
     ys = detector_positions[0, :, 1] / laser_wavelength
     extent = [float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1])]
 
-    # 1. Radiation intensity: |E|^2 = |E_x|^2 + |E_y|^2 + |E_z|^2
     intensity = np.sum(np.abs(electric_field) ** 2, axis=-1)
     im0 = axes[0].imshow(intensity.T, origin="lower", extent=extent, cmap="inferno")
     axes[0].set_title(r"Radiation Intensity $|E_{\mathrm{det}}|^2$")
@@ -547,9 +520,6 @@ def plot_detector_radiation_and_oam(
     axes[0].set_aspect("equal")
     fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
-    # 2. Transverse vortex phase (helical wavefront)
-    # Use E_x when dominant (works for linear-x, RCP, and LCP without RCP cancellation),
-    # or E_y if E_x is zero (linear-y).
     if (
         np.max(np.abs(electric_field[:, :, 0]))
         >= np.max(np.abs(electric_field[:, :, 1])) * 0.5
@@ -583,7 +553,6 @@ def plot_detector_radiation_and_oam(
     cbar1.set_ticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
     cbar1.set_ticklabels([r"$-\pi$", r"$-\pi/2$", r"$0$", r"$\pi/2$", r"$\pi$"])
 
-    # 3. Radiated OAM density Re(dL_z)
     dL_z_real = np.real(dL_z)
     total_Lz = float(np.sum(dL_z_real))
     vmax = max(float(np.max(np.abs(dL_z_real))), 1e-30)
@@ -599,3 +568,168 @@ def plot_detector_radiation_and_oam(
     fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
     fig.tight_layout()
+
+
+def plot_detector_field_map(
+    fig: Figure,
+    values_2d: np.ndarray,
+    extent: tuple[float, float, float, float],
+    title: str,
+    suptitle: str = "Scattered electric field on detector",
+    cmap: str = "bwr",
+    symmetric_limits: bool = True,
+) -> None:
+    """Plots a 2D scalar slice `(Nx, Ny)` on the detector screen
+    (transposed for `origin='lower'`).
+    """
+    ax = fig.add_subplot()
+    fig.suptitle(suptitle)
+    ax.set_title(title)
+
+    data = values_2d.T
+    if symmetric_limits:
+        vmax = max(float(np.max(np.abs(data))), 1e-15)
+        image = ax.imshow(
+            data, cmap=cmap, origin="lower", extent=extent, vmin=-vmax, vmax=vmax
+        )
+    else:
+        image = ax.imshow(data, cmap=cmap, origin="lower", extent=extent)
+
+    ax.set_xlabel("Detector $x/w_0$")
+    ax.set_ylabel("Detector $y/w_0$")
+    ax.grid()
+    fig.colorbar(image)
+    fig.tight_layout()
+
+
+def save_detector_field_component_plots(
+    output_directory: Path,
+    electric_field_2d: np.ndarray,
+    detector_parameters: DetectorParameters,
+    waist_radius: float,
+    formats: Sequence[str] = ("pdf", "png"),
+) -> None:
+    "Saves individual `E_x`, `E_y`, `E_z`, and `|E|` detector field maps."
+    detector_extent: tuple[float, float, float, float] = (
+        (-detector_parameters.width / 2) / waist_radius,
+        (+detector_parameters.width / 2) / waist_radius,
+        (-detector_parameters.height / 2) / waist_radius,
+        (+detector_parameters.height / 2) / waist_radius,
+    )
+
+    for index, coordinate in enumerate(("x", "y", "z")):
+        fig = plt.figure(figsize=(7, 6), dpi=200)
+        plot_detector_field_map(
+            fig,
+            np.real(electric_field_2d[:, :, index]),
+            detector_extent,
+            title=f"$E_{coordinate}$",
+            cmap="bwr",
+            symmetric_limits=True,
+        )
+        save_figure(fig, output_directory / f"electric_field_{coordinate}", formats)
+
+    fig = plt.figure(figsize=(7, 6), dpi=200)
+    plot_detector_field_map(
+        fig,
+        np.linalg.vector_norm(electric_field_2d, axis=-1),
+        detector_extent,
+        title="$|E|$",
+        cmap="inferno",
+        symmetric_limits=False,
+    )
+    save_figure(fig, output_directory / "electric_field_norm", formats)
+
+
+def save_nanofiber_snapshot_plots(
+    output_directory: Path,
+    snapshots: Sequence[SnapshotData],
+    laser_wavelength: float,
+    fiber_radius: float,
+    fiber_length: float,
+    waist_radius: float,
+    j_z: int,
+) -> None:
+    """Generates and saves spatial microbunching, longitudinal phase-space,
+    and transverse profile plots for each recorded nanofiber snapshot.
+    """
+    for snap in snapshots:
+        t_label = f"{snap.time:.1f}T0"
+        pos_np = np.asarray(snap.positions)
+        mom_np = np.asarray(snap.momenta)
+
+        fig = plt.figure(dpi=200)
+        plot_microbunching_spatial_distribution(
+            fig,
+            pos_np,
+            laser_wavelength,
+            fiber_radius,
+            fiber_length,
+            title=f"Electron bunches at $t = {snap.time:.0f} T_0$ ($j_z = {j_z}$)",
+        )
+        save_figure(fig, output_directory / f"microbunching_spatial_{t_label}")
+
+        fig = plt.figure(dpi=200)
+        plot_bunch_phase_space(
+            fig,
+            pos_np,
+            mom_np,
+            laser_wavelength,
+            title=f"Longitudinal phase space $(z, p_z)$ at $t = {snap.time:.0f} T_0$",
+        )
+        save_figure(fig, output_directory / f"phase_space_{t_label}")
+
+        fig = plt.figure(dpi=200)
+        plot_transverse_bunch_profile(
+            fig,
+            pos_np,
+            laser_wavelength,
+            waist_radius,
+            title=f"Transverse distribution $(x, y)$ at $t = {snap.time:.0f} T_0$ ($j_z = {j_z}$)",
+        )
+        save_figure(fig, output_directory / f"transverse_profile_{t_label}")
+
+
+def save_nanofiber_final_plots(
+    output_directory: Path,
+    final_positions: np.ndarray,
+    final_momenta: np.ndarray,
+    all_lz_history: Sequence[np.ndarray],
+    laser_wavelength: float,
+    laser_period: float,
+    t_final_periods: float,
+    j_z: int,
+) -> None:
+    """Generates and saves final energy spectrum, transverse velocity vortex,
+    and beam angular momentum evolution plots for nanofiber simulations.
+    """
+    fig = plt.figure(dpi=200)
+    plot_energy_spectrum(
+        fig,
+        final_momenta,
+        title=f"Electron kinetic energy spectrum at $t = {t_final_periods:.0f} T_0$",
+    )
+    save_figure(fig, output_directory / "final_energy_spectrum")
+
+    fig = plt.figure(dpi=200)
+    plot_transverse_velocity_vortex(
+        fig,
+        final_positions,
+        final_momenta,
+        laser_wavelength,
+        title=f"Transverse velocity field $(v_x, v_y)$ at $t = {t_final_periods:.0f} T_0$ ($j_z = {j_z}$)",
+    )
+    save_figure(fig, output_directory / "transverse_vortex")
+
+    if all_lz_history:
+        total_lz = np.concatenate(all_lz_history)
+        t_axis = np.linspace(0, t_final_periods * laser_period, len(total_lz))
+        fig = plt.figure(dpi=200)
+        plot_beam_angular_momentum_evolution(
+            fig,
+            t_axis,
+            total_lz,
+            laser_period,
+            title=f"Total Beam Angular Momentum (BAM) $\\mathcal{{L}}_z$ evolution ($j_z = {j_z}$)",
+        )
+        save_figure(fig, output_directory / "bam_evolution")

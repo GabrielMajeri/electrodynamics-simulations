@@ -10,6 +10,9 @@ __pycache__/
 # MacOS-generated files
 **/.DS_Store
 
+# Ignore pytest's cache directory
+.pytest_cache/
+
 # Configured cache for JAX jitted functions
 jax_cache/
 

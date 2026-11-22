@@ -14,6 +14,8 @@ from electrodynamics.initial_conditions import (
     generate_initial_positions_on_thin_sheet,
     generate_initial_positions_uniformly_on_disk,
     generate_initial_positions_uniformly_within_ball,
+    generate_nanofiber_initial_positions,
+    to_position_four_vectors,
 )
 
 
@@ -123,3 +125,17 @@ def test_initial_conditions_thin_sheet_polar_grid() -> None:
     # Azimuthal symmetry of polar-grid ensures exact cancellation of dipole moment
     np.testing.assert_allclose(positions[:, 0].mean(), 0.0, atol=1e-12)
     np.testing.assert_allclose(positions[:, 1].mean(), 0.0, atol=1e-12)
+
+
+def test_nanofiber_wrapper_and_four_vectors() -> None:
+    rng_a = np.random.default_rng(7)
+    rng_b = np.random.default_rng(7)
+
+    pos_vol = generate_nanofiber_initial_positions(rng_a, 10.0, 50.0, 100, skin_depth=0.0)
+    pos_ref = generate_initial_positions_in_nanofiber(rng_b, 10.0, 50.0, 100)
+    np.testing.assert_allclose(pos_vol, pos_ref)
+
+    pos_4d = to_position_four_vectors(pos_vol, ct=12.5)
+    assert pos_4d.shape == (100, 4)
+    np.testing.assert_allclose(pos_4d[:, 0], 12.5)
+    np.testing.assert_allclose(pos_4d[:, 1:], pos_vol)

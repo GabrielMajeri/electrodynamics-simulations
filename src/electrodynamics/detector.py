@@ -1,6 +1,11 @@
+from typing import TypeVar
+
+import jax
 import jax_dataclasses as jdc
 import numpy as np
 from scipy.spatial.transform import Rotation
+
+ArrayT = TypeVar("ArrayT", np.ndarray, jax.Array)
 
 
 @jdc.pytree_dataclass
@@ -19,6 +24,24 @@ class DetectorParameters:
     grid_size_y: int
     "Number of points for discretizing the detector in the `y` direction"
 
+    def reshape_to_grid(self, array: ArrayT) -> ArrayT:
+        """Reshapes a flattened `(grid_size_x * grid_size_y, ...)` detector array
+        into 2D grid shape `(grid_size_x, grid_size_y, ...)`.
+        """
+        return array.reshape(self.grid_size_x, self.grid_size_y, *array.shape[1:])
+
+
+def _create_detector_xy_grid(
+    parameters: DetectorParameters,
+) -> tuple[np.ndarray, np.ndarray]:
+    xs = np.linspace(
+        -parameters.width / 2, parameters.width / 2, parameters.grid_size_x
+    )
+    ys = np.linspace(
+        -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
+    )
+    return np.meshgrid(xs, ys, indexing="ij")
+
 
 def initialize_detector_positions_negative_z(
     parameters: DetectorParameters,
@@ -27,14 +50,7 @@ def initialize_detector_positions_negative_z(
     """Initializes the positions for the 2D grid describing the simulated detector's pixels,
     lying at some point along the z axis and being parallel to the x-y plane.
     """
-    xs = np.linspace(
-        -parameters.width / 2, parameters.width / 2, parameters.grid_size_x
-    )
-    ys = np.linspace(
-        -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
-    )
-
-    grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
+    grid_x, grid_y = _create_detector_xy_grid(parameters)
     grid_z = np.full_like(grid_x, z_distance)
 
     return np.stack((grid_x, grid_y, grid_z), axis=-1).reshape(-1, 3)
@@ -46,14 +62,7 @@ def initialize_detector_positions(
     """Initializes the positions for the 2D grid describing the simulated detector's pixels,
     located at an arbitrary point in space, looking towards the given direction.
     """
-    xs = np.linspace(
-        -parameters.width / 2, parameters.width / 2, parameters.grid_size_x
-    )
-    ys = np.linspace(
-        -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
-    )
-
-    grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
+    grid_x, grid_y = _create_detector_xy_grid(parameters)
     grid_z = np.zeros_like(grid_x)
 
     positions_arr = np.stack((grid_x, grid_y, grid_z), axis=-1).reshape(-1, 3)
@@ -84,14 +93,7 @@ def initialize_detector_positions_reflected(
         where lab_positions_flat has shape (Nx * Ny, 3) and
         local_coords_2d has shape (Nx, Ny, 3) with (x'_d, y'_d, -distance).
     """
-    xs = np.linspace(
-        -parameters.width / 2, parameters.width / 2, parameters.grid_size_x
-    )
-    ys = np.linspace(
-        -parameters.height / 2, parameters.height / 2, parameters.grid_size_y
-    )
-
-    grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
+    grid_x, grid_y = _create_detector_xy_grid(parameters)
     grid_z = np.full_like(grid_x, -abs(distance))
 
     local_coords_2d = np.stack((grid_x, grid_y, grid_z), axis=-1)

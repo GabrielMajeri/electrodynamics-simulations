@@ -2,6 +2,8 @@ import jax
 import jax.numpy as jnp
 import jax_dataclasses as jdc
 
+from electrodynamics.constants import SPEED_OF_LIGHT
+
 
 @jdc.jit
 def gaussian_envelope(
@@ -63,7 +65,7 @@ def compute_pulse_envelope(
     pulse_parameters: jdc.Static[GaussianPulseParameters],
     propagation_direction: jdc.Static[int] = 1,
     reference_position: jdc.Static[float] = 0.0,
-    c: jdc.Static[float] = 137.036,
+    c: jdc.Static[float] = SPEED_OF_LIGHT,
     incidence_angle: jdc.Static[float] = 0.0,
 ) -> jax.Array:
     """Computes the scalar pulse envelope modulation at given 4-positions

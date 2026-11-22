@@ -1,4 +1,3 @@
-import json
 from datetime import UTC, datetime
 from math import pi
 from pathlib import Path
@@ -15,6 +14,9 @@ from rich import print
 
 from electrodynamics.beams import LaguerreGaussBeamParameters
 from electrodynamics.constants import (
+    DEFAULT_LASER_FREQUENCY,
+)
+from electrodynamics.constants import (
     ELECTRON_CHARGE as q,
 )
 from electrodynamics.constants import (
@@ -27,15 +29,17 @@ from electrodynamics.fields import compute_doppler_shift_factor
 from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_moving_towards_laser,
     generate_initial_positions_uniformly_on_disk,
+    to_position_four_vectors,
 )
 from electrodynamics.integrate import integration_step_rk4
 from electrodynamics.jax import initialize_jax
+from electrodynamics.plotting import save_figure
 from electrodynamics.polarization import Polarizations
 from electrodynamics.pulse import (
     PulseWithFlatPeakParameters,
     gaussian_envelope_with_flat_peak,
 )
-from electrodynamics.serialization import ConfigurationEncoder
+from electrodynamics.serialization import prepare_output_directory, save_json
 
 
 @jdc.pytree_dataclass
@@ -88,56 +92,34 @@ def compute_particle_trajectory(
             pulse_parameters,
         )
 
-        # t is the time in the laboratory frame
         laboratory_time = cast(float, new_position[0, 0] / c)
-        # x is the particle position in the laboratory frame
         particle_position = new_position[0, 1:4]
         particle_velocity = new_momentum[0, 1:4]
 
-        # r_0(t) = r(t) - R_0
         particle_displacement = particle_position - initial_position[1:4]
-
-        # x_0(t) = x - R_0
         detector_displacement = spectrum_measurement_position - initial_position[1:4]
 
-        # R(x_0, t) = x_0 - r_0(t) = (x - R_0) - (r(t) - R_0) = x - r(t)
         displacement = detector_displacement - particle_displacement
         displacement_norm = cast(float, jnp.linalg.vector_norm(displacement, axis=-1))
-
-        # n(x_0, t) = R(x_0, t)/|R(x_0, t)|
         view_direction = displacement / displacement_norm
 
-        # omega * (t + R(x_0, t)/c)
         oscillatory_kernel_exponent = central_frequency * (
             laboratory_time + displacement_norm / c
         )
 
-        # Taylor series approximation:
-        # oscillatory_kernel_exponent = fourier_frequency * (
-        #     laboratory_time
-        #     - jnp.linalg.vecdot(particle_position, view_direction, axis=-1) / c
-        # )
-
-        # \gamma \beta = u / c (scaled by dt/d\tau = \gamma for proper time integration)
         beta = particle_velocity / c
         gamma_factor = cast(float, new_momentum[0, 0] / c)
 
-        # ===== Electric field terms =====
-        # Common term: n(x_0, t) \times (n(x_0, t) \times \beta(t))
         electric_field_common_term = jnp.cross(
             view_direction, jnp.cross(view_direction, beta)
         )
 
-        # O(1/|R|) term
-        # - ((i * omega) / c) * (common term) / |R(x_0, t)|
         electric_field_first_term = -((1j * central_frequency) / c) * (
             electric_field_common_term / displacement_norm
         )
 
         displacement_norm_squared = displacement_norm * displacement_norm
 
-        # O(1/|R|^2) term
-        # [(common term) + n(x_0, t) * (\gamma + dot(n(x_0, t), \gamma \beta(t)))] / |R(x_0, t)|^2
         electric_field_second_term = (
             electric_field_common_term
             + view_direction
@@ -148,13 +130,9 @@ def compute_particle_trajectory(
 
         n_cross_beta = jnp.cross(view_direction, beta)
 
-        # ===== Magnetic field terms =====
-        # O(1/|R|) term
         magnetic_field_first_term = ((1j * central_frequency) / c) * (
             n_cross_beta / displacement_norm
         )
-
-        # O(1/|R|^2) term
         magnetic_field_second_term = n_cross_beta / displacement_norm_squared
 
         electric_field_multiplier = (
@@ -244,9 +222,7 @@ def main(
     print("Configuring and initializing JAX")
     initialize_jax()
 
-    # Monochromatic laser
-    laser_frequency = 0.057
-    # ~800 nm, red light
+    laser_frequency = DEFAULT_LASER_FREQUENCY
     laser_wavelength = (2 * pi * c) / laser_frequency
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
@@ -265,9 +241,7 @@ def main(
     )
     print("Laser parameters:", laser_parameters)
 
-    # Exact formula for frequency Doppler shift factor
     doppler_shift_factor = compute_doppler_shift_factor(gamma, m_e, q, a_0)
-
     print(f"Relativistic factor (gamma): {gamma}")
     print(f"Corresponding Doppler shift: {doppler_shift_factor}")
 
@@ -275,17 +249,12 @@ def main(
     print(f"Looking around Fourier frequency omega = {central_frequency}")
 
     generator = np.random.default_rng(seed)
-
     disk_radius = 10 * laser_wavelength
 
-    initial_position = generate_initial_positions_uniformly_on_disk(
+    initial_position_3d = generate_initial_positions_uniformly_on_disk(
         generator, disk_radius, 1
     )
-    # Add a 0 on the first index to obtain a position 4-vector
-    initial_position = np.concatenate(
-        (np.zeros((1, 1), dtype=np.float64), initial_position), axis=-1
-    )
-
+    initial_position = to_position_four_vectors(initial_position_3d)
     initial_momentum = generate_initial_particle_momenta_moving_towards_laser(
         1, gamma, m_e
     )
@@ -293,11 +262,9 @@ def main(
     initial_position = jnp.asarray(initial_position[0])
     initial_momentum = jnp.asarray(initial_momentum[0])
 
-    ### Pulse parameters ###
     tau_0 = (10 * jnp.pi) / laser_frequency
     phi_0 = 5 * tau_0
     peak_duration_periods = 10
-
     pulse_parameters = PulseWithFlatPeakParameters(phi_0, tau_0, peak_duration_periods)
     print("Pulse parameters:", pulse_parameters)
 
@@ -337,20 +304,12 @@ def main(
     )
 
     end_time = perf_counter()
-    duration = end_time - start_time
-    print(f"Took {duration} seconds")
+    print(f"Took {end_time - start_time} seconds")
 
     print("Saving results to disk")
-
-    runs_directory = Path("runs")
-
-    if overwrite:
-        output_directory = runs_directory / "single_electron_trajectory_latest"
-    else:
-        timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-        output_directory = runs_directory / f"single_electron_trajectory_{timestamp}"
-
-    output_directory.mkdir(parents=True, exist_ok=True)
+    output_directory = prepare_output_directory(
+        "single_electron_trajectory", run_datetime, overwrite=overwrite
+    )
 
     configuration = {
         "laser_parameters": laser_parameters,
@@ -364,17 +323,10 @@ def main(
         "spectrum_measurement_position_in_multiples_of_lambda": spectrum_measurement_position
         / laser_wavelength,
     }
+    save_json(output_directory / "configuration.json", configuration)
 
-    with open(output_directory / "configuration.json", "w") as file:
-        json.dump(configuration, file, indent=2, cls=ConfigurationEncoder)
-
-    plots_directory = output_directory
-
-    # Plot laser pulse envelope
     fig, ax = plt.subplots(dpi=200)
-
     fig.suptitle("Laser pulse envelope")
-
     phi = jnp.linspace(0, 10 * tau_0 + peak_duration_periods * tau_0, 1000)
     envelope = jnp.abs(
         jnp.exp(1j * laser_parameters.frequency * phi)
@@ -385,94 +337,65 @@ def main(
             pulse_parameters.peak_duration_periods,
         )
     )
-
     ax.plot(phi / ((2 * jnp.pi) / laser_frequency), envelope)
-
     ax.set_xlabel("$\\phi$ (periods)")
     ax.set_ylabel("Envelope")
-
     ax.grid()
-
     fig.tight_layout()
-    fig.savefig(plots_directory / "laser_pulse_envelope.pdf")
+    save_figure(fig, output_directory / "laser_pulse_envelope", formats=("pdf",))
 
     plot_electron_trajectory(
-        plots_directory,
+        output_directory,
         np.asarray(trajectory.timestamps),
         np.asarray(trajectory.positions),
         np.asarray(trajectory.momenta),
     )
 
-    ### Plot oscillatory kernel exponent
     fig, ax = plt.subplots(dpi=200)
-
     fig.suptitle("Exponent of the oscillatory kernel")
-
     ax.set_title("$\\omega (t + R(x_0, t)/c)$")
-
     ax.plot(trajectory.timestamps, trajectory.oscillatory_kernel_exponents)
-
     oscillatory_kernel_derivative = jnp.gradient(
         trajectory.oscillatory_kernel_exponents, trajectory.timestamps
     )
-
     twin_ax = ax.twinx()
     twin_ax.plot(trajectory.timestamps, oscillatory_kernel_derivative)
-
-    # ax.legend()
     ax.grid()
-
     fig.tight_layout()
-    fig.savefig(plots_directory / "oscillatory_kernel_exponents.pdf")
+    save_figure(fig, output_directory / "oscillatory_kernel_exponents", formats=("pdf",))
 
-    ### Plot oscillatory kernel
     fig, ax = plt.subplots(dpi=200)
-
     fig.suptitle("Oscillatory kernel")
-
     ax.set_title("$\\exp(i \\omega (t + R(x_0, t)/c))$")
-
     ax.plot(
         trajectory.timestamps,
         jnp.real(jnp.exp(1j * trajectory.oscillatory_kernel_exponents)),
     )
     ax.grid()
-
     fig.tight_layout()
-    fig.savefig(plots_directory / "oscillatory_kernel.pdf")
+    save_figure(fig, output_directory / "oscillatory_kernel", formats=("pdf",))
 
-    ### Plot amplitude function
     fig, ax = plt.subplots(dpi=200)
-
     fig.suptitle("Multiplier in the electric field integral")
-
     E_x, E_y, E_z = np.real(trajectory.electric_field_multipliers).T
-
     ax.plot(trajectory.timestamps, E_x - np.mean(E_x), label="$E_x$")
     ax.plot(trajectory.timestamps, E_y - np.mean(E_y), label="$E_y$")
     ax.plot(trajectory.timestamps, E_z - np.mean(E_z), label="$E_z$")
-
     ax.legend()
     ax.grid()
-
     fig.tight_layout()
-    fig.savefig(plots_directory / "electric_field_multipliers.pdf")
+    save_figure(fig, output_directory / "electric_field_multipliers", formats=("pdf",))
 
     fig, ax = plt.subplots(dpi=200)
-
     fig.suptitle("Multiplier in the magnetic field integral")
-
     B_x, B_y, B_z = np.real(trajectory.magnetic_field_multipliers).T
-
     ax.plot(trajectory.timestamps, B_x - np.mean(B_x), label="$B_x$")
     ax.plot(trajectory.timestamps, B_y - np.mean(B_y), label="$B_y$")
     ax.plot(trajectory.timestamps, B_z - np.mean(B_z), label="$B_z$")
-
     ax.legend()
     ax.grid()
-
     fig.tight_layout()
-    fig.savefig(plots_directory / "magnetic_field_multipliers.pdf")
+    save_figure(fig, output_directory / "magnetic_field_multipliers", formats=("pdf",))
 
     print(f"Saved run output to '{output_directory}'")
 
@@ -484,32 +407,24 @@ def plot_electron_trajectory(
     momenta: np.ndarray,
 ) -> None:
     fig, ax = plt.subplots()
-
-    # ax.plot(result.timestamps, positions[:, 0] - positions[:, 0].mean(), label="ct")
     ax.plot(timestamps, positions[:, 1] - positions[:, 1].mean(), label="x")
     ax.plot(timestamps, positions[:, 2] - positions[:, 2].mean(), label="y")
     ax.plot(timestamps, positions[:, 3] - positions[:, 3].mean(), label="z")
-
     ax.legend()
     ax.grid()
-
     fig.tight_layout()
-    fig.savefig(plots_directory / "trajectory_positions.pdf")
+    save_figure(fig, plots_directory / "trajectory_positions", formats=("pdf",))
 
     fig, ax = plt.subplots()
-
     gamma_ax = ax.twinx()
     gamma_ax.plot(timestamps, momenta[:, 0] / c, label="$\\gamma$", color="cyan")
-
     ax.plot(timestamps, momenta[:, 1], label="$u_1$")
     ax.plot(timestamps, momenta[:, 2], label="$u_2$")
     ax.plot(timestamps, momenta[:, 3], label="$u_3$")
-
     ax.legend()
     ax.grid()
-
     fig.tight_layout()
-    fig.savefig(plots_directory / "trajectory_momenta.pdf")
+    save_figure(fig, plots_directory / "trajectory_momenta", formats=("pdf",))
 
 
 if __name__ == "__main__":

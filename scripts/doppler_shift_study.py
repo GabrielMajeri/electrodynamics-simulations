@@ -1,6 +1,5 @@
-import json
 from datetime import UTC, datetime
-from pathlib import Path
+from math import pi
 from time import perf_counter
 from typing import Annotated
 
@@ -13,7 +12,12 @@ import typer
 from rich import print
 
 from electrodynamics.beams import LaguerreGaussBeamParameters
-from electrodynamics.constants import ELECTRON_CHARGE, ELECTRON_MASS, SPEED_OF_LIGHT
+from electrodynamics.constants import (
+    DEFAULT_LASER_FREQUENCY,
+    ELECTRON_CHARGE,
+    ELECTRON_MASS,
+    SPEED_OF_LIGHT,
+)
 from electrodynamics.fields import (
     compute_doppler_shift_factor,
     compute_scattered_electric_and_magnetic_fields,
@@ -21,13 +25,14 @@ from electrodynamics.fields import (
 from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_moving_towards_laser,
     generate_initial_positions_uniformly_on_disk,
+    to_position_four_vectors,
 )
 from electrodynamics.integrate import integration_step_rk4
-from electrodynamics.jax import initialize_jax
-from electrodynamics.plotting import plot_scattered_radiation_spectrum
+from electrodynamics.jax import initialize_jax, iterate_sharded_particle_batches
+from electrodynamics.plotting import plot_scattered_radiation_spectrum, save_figure
 from electrodynamics.polarization import Polarizations
 from electrodynamics.pulse import PulseWithFlatPeakParameters
-from electrodynamics.serialization import ConfigurationEncoder
+from electrodynamics.serialization import prepare_output_directory, save_json
 
 type PulseParameters = PulseWithFlatPeakParameters
 
@@ -71,18 +76,15 @@ def integrate_particles(
 
     batch_size = len(initial_positions)
 
-    scattered_electric_field = jnp.zeros(
-        shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128
-    )
-    scattered_magnetic_field = jnp.zeros(
-        shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128
-    )
-
     scattered_electric_field = jax.lax.pcast(
-        scattered_electric_field, "i", to="varying"
+        jnp.zeros(shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
     scattered_magnetic_field = jax.lax.pcast(
-        scattered_magnetic_field, "i", to="varying"
+        jnp.zeros(shape=(batch_size, num_frequencies, 3), dtype=jnp.complex128),
+        "i",
+        to="varying",
     )
 
     compute_scattered_fields_for_all_frequencies = jax.vmap(
@@ -155,10 +157,7 @@ def integrate_particles(
         length=num_time_steps,
     )
 
-    return (
-        scattered_electric_field,
-        scattered_magnetic_field,
-    )
+    return scattered_electric_field, scattered_magnetic_field
 
 
 def simulate_trajectories(
@@ -179,59 +178,40 @@ def simulate_trajectories(
         "Simulating trajectories for all particles and computing frequency spectrum of scattered field"
     )
 
-    num_devices = min(len(initial_positions), len(jax.devices()))
-    if len(initial_positions) % batch_size != 0:
-        raise ValueError(
-            f"Number of electrons ({len(initial_positions)}) must be divisible by batch_size ({batch_size})"
-        )
-    if batch_size % num_devices != 0:
-        raise ValueError(
-            f"Batch size ({batch_size}) must be divisible by number of devices ({num_devices})"
+    scattered_electric_field_spectrum = jnp.zeros(
+        (num_frequencies, 3), dtype=jnp.complex128
+    )
+    scattered_magnetic_field_spectrum = jnp.zeros(
+        (num_frequencies, 3), dtype=jnp.complex128
+    )
+
+    for index, _num_batches, batch_positions, batch_momenta in (
+        iterate_sharded_particle_batches(initial_positions, initial_momenta, batch_size)
+    ):
+        print(f"Batch #{index}")
+        (
+            batch_scattered_electric_field_spectrum,
+            batch_scattered_magnetic_field_spectrum,
+        ) = integrate_particles(
+            batch_positions,
+            batch_momenta,
+            start_time,
+            end_time,
+            time_step,
+            laser_parameters,
+            pulse_parameters,
+            central_frequency,
+            frequency_width,
+            num_frequencies,
+            spectrum_measurement_position,
         )
 
-    mesh = jax.make_mesh((num_devices,), ("i",))
-    with jax.set_mesh(mesh):
-        num_batches = len(initial_positions) // batch_size
-
-        batches = zip(
-            jnp.split(initial_positions, num_batches, axis=0),
-            jnp.split(initial_momenta, num_batches, axis=0),
-        )
-        scattered_electric_field_spectrum = jnp.zeros(
-            (num_frequencies, 3), dtype=jnp.complex128
-        )
-        scattered_magnetic_field_spectrum = jnp.zeros(
-            (num_frequencies, 3), dtype=jnp.complex128
-        )
-
-        for index, batch in enumerate(batches):
-            print(f"Batch #{index}")
-            batch_positions = jax.device_put(batch[0], jax.P("i", None))
-            batch_momenta = jax.device_put(batch[1], jax.P("i", None))
-
-            (
-                batch_scattered_electric_field_spectrum,
-                batch_scattered_magnetic_field_spectrum,
-            ) = integrate_particles(
-                batch_positions,
-                batch_momenta,
-                start_time,
-                end_time,
-                time_step,
-                laser_parameters,
-                pulse_parameters,
-                central_frequency,
-                frequency_width,
-                num_frequencies,
-                spectrum_measurement_position,
-            )
-
-            scattered_electric_field_spectrum += jnp.sum(
-                batch_scattered_electric_field_spectrum, axis=0
-            ).block_until_ready()
-            scattered_magnetic_field_spectrum += jnp.sum(
-                batch_scattered_magnetic_field_spectrum, axis=0
-            ).block_until_ready()
+        scattered_electric_field_spectrum += jnp.sum(
+            batch_scattered_electric_field_spectrum, axis=0
+        ).block_until_ready()
+        scattered_magnetic_field_spectrum += jnp.sum(
+            batch_scattered_magnetic_field_spectrum, axis=0
+        ).block_until_ready()
 
     return IntegrationResult(
         np.linspace(
@@ -291,15 +271,11 @@ def main(
 
     initialize_jax()
 
-    from math import pi
-
     c = SPEED_OF_LIGHT
     m_e = ELECTRON_MASS
     q = ELECTRON_CHARGE
 
-    # Monochromatic laser
-    laser_frequency = 0.057
-    # ~800 nm, red light
+    laser_frequency = DEFAULT_LASER_FREQUENCY
     laser_wavelength = (2 * pi * c) / laser_frequency
 
     amplitude = a_0 * m_e * c * laser_frequency / abs(q)
@@ -320,14 +296,10 @@ def main(
     seed = 42
     generator = np.random.default_rng(seed)
     disk_radius = 100 * laser_wavelength
-    initial_positions = generate_initial_positions_uniformly_on_disk(
+    initial_positions_3d = generate_initial_positions_uniformly_on_disk(
         generator, disk_radius, num_electrons
     )
-
-    # Add a 0 on the first index to obtain position 4-vectors
-    initial_positions = np.concatenate(
-        (np.zeros((num_electrons, 1), dtype=np.float64), initial_positions), axis=-1
-    )
+    initial_positions = to_position_four_vectors(initial_positions_3d)
 
     initial_momenta = generate_initial_particle_momenta_moving_towards_laser(
         num_particles=num_electrons, gamma=gamma, particle_mass=m_e
@@ -336,7 +308,6 @@ def main(
     initial_positions = jnp.asarray(initial_positions)
     initial_momenta = jnp.asarray(initial_momenta)
 
-    ### Pulse parameters ###
     tau_0 = (10 * np.pi) / laser_frequency
     phi_0 = 5 * tau_0
     peak_duration_periods = 10
@@ -355,7 +326,6 @@ def main(
     )
 
     doppler_shift_factor = compute_doppler_shift_factor(gamma, m_e, q, a_0)
-
     central_frequency = laser_parameters.frequency * doppler_shift_factor
     print(f"Looking around Fourier frequency omega = {central_frequency}")
 
@@ -374,15 +344,9 @@ def main(
         f"Measuring scattered radiation frequency spectrum at {spectrum_measurement_position}"
     )
 
-    runs_directory = Path("runs")
-
-    if overwrite:
-        output_directory = runs_directory / "doppler_shift_latest"
-    else:
-        timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-        output_directory = runs_directory / f"doppler_shift_{timestamp}"
-
-    output_directory.mkdir(parents=True, exist_ok=True)
+    output_directory = prepare_output_directory(
+        "doppler_shift", run_datetime, overwrite=overwrite
+    )
 
     print("Saving run configuration")
     configuration = {
@@ -399,11 +363,7 @@ def main(
         "spectrum_measurement_position_in_multiples_of_lambda": spectrum_measurement_position
         / laser_wavelength,
     }
-
-    with open(output_directory / "configuration.json", "w") as file:
-        json.dump(configuration, file, indent=2, cls=ConfigurationEncoder)
-
-    plots_directory = output_directory
+    save_json(output_directory / "configuration.json", configuration)
 
     print("Starting simulation")
     start_time = perf_counter()
@@ -424,22 +384,17 @@ def main(
     )
 
     end_time = perf_counter()
-    duration = end_time - start_time
-    print(f"Took {duration} seconds")
+    print(f"Took {end_time - start_time} seconds")
 
-    print("Plotting experimental setup")
-
-    ### Scattered electric field spectrum
+    print("Plotting scattered electric field spectrum")
     fig = plt.figure(dpi=200)
-
     plot_scattered_radiation_spectrum(
         fig,
         central_frequency,
         result.frequencies,
         np.asarray(result.scattered_electric_field_spectrum),
     )
-
-    fig.savefig(plots_directory / "electric_field_spectrum.pdf")
+    save_figure(fig, output_directory / "electric_field_spectrum", formats=("pdf",))
 
 
 if __name__ == "__main__":

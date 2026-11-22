@@ -69,10 +69,10 @@ def test_paraxial_exact_vs_approximate_options(jax_config) -> None:
 
     # Test Gaussian beam options
     params_gauss_exact = GaussianBeamParameters(
-        freq, wavelength, 1.0, Polarizations.LINEAR.value, waist, exact_paraxial=True
+        freq, wavelength, 1.0, Polarizations.LINEAR_X.value, waist, exact_paraxial=True
     )
     params_gauss_approx = GaussianBeamParameters(
-        freq, wavelength, 1.0, Polarizations.LINEAR.value, waist, exact_paraxial=False
+        freq, wavelength, 1.0, Polarizations.LINEAR_X.value, waist, exact_paraxial=False
     )
 
     # Test Gaussian beam options at Rayleigh distance where curvature is maximal
@@ -156,16 +156,58 @@ def test_directional_beam_fields(jax_config) -> None:
     freq = 0.057
     wavelength = (2 * math.pi * c) / freq
     amp = 1.0
-    laser = LaserParameters(freq, wavelength, amp, Polarizations.LINEAR.value)
+    laser = LaserParameters(freq, wavelength, amp, Polarizations.LINEAR_X.value)
 
     # Forward (+z)
     pos = jnp.array([[0.0, 0.0, 0.0, 100.0]])
-    em_fwd = compute_directional_beam_fields(laser, pos, propagation_direction=1, focal_position=100.0)
+    em_fwd = compute_directional_beam_fields(
+        laser, pos, propagation_direction=1, focal_position=100.0
+    )
     np.testing.assert_allclose(em_fwd.electric_field[0, 0], amp, rtol=1e-5)
 
     # Counter-propagating (-z): at t=1.0, wavefront moves to z = 100.0 - c*1.0
     pos_back = jnp.array([[c * 1.0, 0.0, 0.0, 100.0 - c * 1.0]])
-    em_back = compute_directional_beam_fields(laser, pos_back, propagation_direction=-1, focal_position=100.0)
+    em_back = compute_directional_beam_fields(
+        laser, pos_back, propagation_direction=-1, focal_position=100.0
+    )
     np.testing.assert_allclose(em_back.electric_field[0, 0], amp, rtol=1e-5)
     # Check B_y has opposite sign for -z propagation
     np.testing.assert_allclose(em_back.magnetic_field[0, 1], -amp / c, rtol=1e-5)
+
+
+def test_compute_beam_fields_dispatch(jax_config) -> None:
+    from electrodynamics.beams import (
+        LaserParameters,
+        compute_beam_fields,
+        compute_plane_wave_fields,
+    )
+
+    freq = 0.057
+    wavelength = (2 * math.pi * c) / freq
+    pos = jnp.array([[0.0, 5.0, -3.0, 10.0]])
+
+    plane = LaserParameters(freq, wavelength, 1.0, Polarizations.LINEAR_X.value)
+    gauss = GaussianBeamParameters(
+        freq, wavelength, 1.0, Polarizations.LINEAR_X.value, 5.0 * wavelength
+    )
+    lg = LaguerreGaussBeamParameters(
+        freq,
+        wavelength,
+        1.0,
+        Polarizations.RIGHT_CIRCULAR.value,
+        5.0 * wavelength,
+        0,
+        1,
+    )
+
+    em_p = compute_beam_fields(plane, pos)
+    em_p_ref = compute_plane_wave_fields(plane, pos)
+    np.testing.assert_allclose(em_p.electric_field, em_p_ref.electric_field)
+
+    em_g = compute_beam_fields(gauss, pos)
+    em_g_ref = compute_gaussian_beam_fields(gauss, pos)
+    np.testing.assert_allclose(em_g.electric_field, em_g_ref.electric_field)
+
+    em_lg = compute_beam_fields(lg, pos)
+    em_lg_ref = compute_laguerre_gauss_beam_fields(lg, pos)
+    np.testing.assert_allclose(em_lg.electric_field, em_lg_ref.electric_field)

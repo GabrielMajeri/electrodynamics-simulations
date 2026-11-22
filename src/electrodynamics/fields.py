@@ -95,6 +95,37 @@ def compute_acceleration_of_charged_particle_in_em_field(
 
 
 @jdc.jit
+def compute_lab_time_lorentz_derivatives(
+    momentum: jax.Array,
+    electric_field: jax.Array,
+    magnetic_field: jax.Array,
+    charge_to_mass_ratio: jdc.Static[float],
+) -> tuple[jax.Array, jax.Array]:
+    """Computes laboratory time derivatives `d(position)/dt` and `d(momentum)/dt`:
+      `d(position)/dt = (c, v_x, v_y, v_z)`,
+      `d(momentum)/dt = (du^0/dt, du^1/dt, du^2/dt, du^3/dt)`,
+    where `v = c * u / u^0` and `du/dt = (q/m) * (E + v x B)`.
+    """
+    u0 = momentum[..., 0:1]
+    u = momentum[..., 1:4]
+
+    gamma = u0 / c
+    v = u / gamma
+
+    v_cross_B = jnp.cross(v, magnetic_field)
+
+    du = charge_to_mass_ratio * (electric_field + v_cross_B)
+    du0 = (charge_to_mass_ratio / c) * jnp.sum(
+        v * electric_field, axis=-1, keepdims=True
+    )
+
+    d_momentum = jnp.concatenate([du0, du], axis=-1)
+    d_position = jnp.concatenate([jnp.full_like(u0, c), v], axis=-1)
+
+    return d_position, d_momentum
+
+
+@jdc.jit
 def compute_scattered_electric_and_magnetic_fields(
     frequency: float | jax.Array,
     position: jax.Array,
@@ -218,3 +249,49 @@ def compute_scattered_electric_and_magnetic_fields(
     magnetic_field = oscillatory_kernel * magnetic_field_terms
 
     return electric_field / (2 * pi), magnetic_field / (2 * pi)
+
+
+@jdc.jit
+def compute_coherent_detector_and_spectrum_fields(
+    positions: jax.Array,
+    momenta: jax.Array,
+    origin_positions: jax.Array,
+    detector_positions: jax.Array,
+    radiation_frequency: float | jax.Array,
+    spectrum_position: jax.Array,
+    frequencies: jax.Array,
+    is_lab_time: jdc.Static[bool] = True,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Evaluates scattered EM fields from all particles, summing up the total coherently.
+
+    Returns the total scattered electric and magnetic fields at the detector positions,
+    and the total scattered electric field at the spectrum position,
+    for each frequency in the `frequencies` array.
+    """
+
+    def compute_pixel(dp: jax.Array) -> tuple[jax.Array, jax.Array]:
+        E, B = compute_scattered_electric_and_magnetic_fields(
+            radiation_frequency,
+            positions,
+            momenta,
+            origin_positions,
+            dp,
+            is_lab_time=is_lab_time,
+        )
+        return jnp.sum(E, axis=0), jnp.sum(B, axis=0)
+
+    dE_det, dB_det = jax.vmap(compute_pixel)(detector_positions)
+
+    def compute_spec(w: jax.Array) -> jax.Array:
+        e, _ = compute_scattered_electric_and_magnetic_fields(
+            w,
+            positions,
+            momenta,
+            origin_positions,
+            spectrum_position,
+            is_lab_time=is_lab_time,
+        )
+        return jnp.sum(e, axis=0)
+
+    dE_spec = jax.vmap(compute_spec)(frequencies)
+    return dE_det, dB_det, dE_spec

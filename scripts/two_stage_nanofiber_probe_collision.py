@@ -1,7 +1,5 @@
-import json
 from datetime import UTC, datetime
-from math import pi, sqrt
-from pathlib import Path
+from math import pi
 from time import perf_counter
 from typing import Annotated
 
@@ -13,11 +11,18 @@ import numpy as np
 import typer
 from rich import print
 
-from electrodynamics.angular_momentum import compute_angular_momentum_derivative
+from electrodynamics.angular_momentum import (
+    compute_angular_momentum_derivative,
+    compute_particle_angular_momentum_z,
+)
 from electrodynamics.beams import (
     GaussianBeamParameters,
     LaguerreGaussBeamParameters,
     LaserParameters,
+)
+from electrodynamics.constants import (
+    DEFAULT_LASER_FREQUENCY,
+    HARTREE_TO_EV,
 )
 from electrodynamics.constants import (
     ELECTRON_CHARGE as q,
@@ -32,41 +37,34 @@ from electrodynamics.detector import (
     DetectorParameters,
     initialize_detector_positions_negative_z,
 )
-from electrodynamics.fields import (
-    compute_scattered_electric_and_magnetic_fields,
-)
+from electrodynamics.fields import compute_coherent_detector_and_spectrum_fields
 from electrodynamics.initial_conditions import (
     generate_initial_particle_momenta_at_rest,
-    generate_initial_positions_in_nanofiber,
-    generate_initial_positions_in_nanofiber_surface,
+    generate_nanofiber_initial_positions,
+    to_position_four_vectors,
 )
 from electrodynamics.integrate import (
+    SnapshotData,
     integration_step_rk4_lab_time_two_pulses,
+    parse_snapshot_schedule,
 )
 from electrodynamics.jax import initialize_jax
 from electrodynamics.plotting import (
-    plot_beam_angular_momentum_evolution,
-    plot_bunch_phase_space,
     plot_detector_radiation_and_oam,
-    plot_energy_spectrum,
-    plot_microbunching_spatial_distribution,
     plot_scattered_radiation_spectrum,
-    plot_transverse_bunch_profile,
-    plot_transverse_velocity_vortex,
+    save_figure,
+    save_nanofiber_final_plots,
+    save_nanofiber_snapshot_plots,
 )
-from electrodynamics.polarization import Polarizations
+from electrodynamics.polarization import (
+    get_polarization_by_name,
+    resolve_circular_polarization,
+)
 from electrodynamics.pulse import (
     CosineSquaredPulseParameters,
     GaussianPulseParameters,
 )
-from electrodynamics.serialization import ConfigurationEncoder
-
-
-@jdc.pytree_dataclass
-class SnapshotData:
-    time: float
-    positions: jax.Array
-    momenta: jax.Array
+from electrodynamics.serialization import prepare_output_directory, save_json
 
 
 @jdc.jit
@@ -113,42 +111,23 @@ def integrate_interval_two_stage(
             probe_reference_z=probe_reference_z,
         )
 
-        # L_z = x * p_y - y * p_x for each particle, sum across bunch
-        lz_step = jnp.sum(
-            next_pos[:, 1] * next_mom[:, 2] - next_pos[:, 2] * next_mom[:, 1]
-        )
+        lz_step = jnp.sum(compute_particle_angular_momentum_z(next_pos, next_mom))
 
         if compute_radiation:
             current_time = next_pos[0, 0] / c
             in_window = current_time >= radiation_start_time
 
             def compute_rad():
-                def compute_pixel(dp):
-                    e, b = compute_scattered_electric_and_magnetic_fields(
-                        radiation_frequency,
-                        next_pos,
-                        next_mom,
-                        origin_positions,
-                        dp,
-                        is_lab_time=True,
-                    )
-                    return jnp.sum(e, axis=0), jnp.sum(b, axis=0)
-
-                dE_det, dB_det = jax.vmap(compute_pixel)(detector_positions)
-
-                def compute_spec(w):
-                    e, _ = compute_scattered_electric_and_magnetic_fields(
-                        w,
-                        next_pos,
-                        next_mom,
-                        origin_positions,
-                        spectrum_position,
-                        is_lab_time=True,
-                    )
-                    return jnp.sum(e, axis=0)
-
-                dE_spec = jax.vmap(compute_spec)(frequencies)
-                return dE_det, dB_det, dE_spec
+                return compute_coherent_detector_and_spectrum_fields(
+                    next_pos,
+                    next_mom,
+                    origin_positions,
+                    detector_positions,
+                    radiation_frequency,
+                    spectrum_position,
+                    frequencies,
+                    is_lab_time=True,
+                )
 
             def zero_rad():
                 return (
@@ -355,37 +334,18 @@ def main(
 
     initialize_jax()
 
-    # Fundamental laser parameters in atomic units
-    laser_frequency = 0.057
+    laser_frequency = DEFAULT_LASER_FREQUENCY
     laser_wavelength = (2 * pi * c) / laser_frequency
     laser_period = (2 * pi) / laser_frequency
 
-    # Stage 1: Drive LG laser setup
     amplitude_drive = a_0 * m_e * c * laser_frequency / abs(q)
     waist_drive = waist_radius_lambda * laser_wavelength
     fiber_radius = fiber_radius_lambda * laser_wavelength
     fiber_length = fiber_length_lambda * laser_wavelength
 
-    if polarization_handedness == "same":
-        # Helical bunches: j_z = l + sigma != 0 (e.g. l=1, sigma=+1 => j_z=2)
-        drive_pol = (
-            Polarizations.LEFT_CIRCULAR.value
-            if azimuthal_index >= 0
-            else Polarizations.RIGHT_CIRCULAR.value
-        )
-        sigma = +1 if azimuthal_index >= 0 else -1
-    elif polarization_handedness == "opposite":
-        # Axisymmetric disks: j_z = l + sigma = 0
-        drive_pol = (
-            Polarizations.RIGHT_CIRCULAR.value
-            if azimuthal_index >= 0
-            else Polarizations.LEFT_CIRCULAR.value
-        )
-        sigma = -1 if azimuthal_index >= 0 else +1
-    else:
-        raise ValueError(
-            f"Unknown polarization_handedness '{polarization_handedness}'. Choose 'same' or 'opposite'."
-        )
+    drive_pol, sigma = resolve_circular_polarization(
+        azimuthal_index, polarization_handedness
+    )
 
     j_z = azimuthal_index + sigma
     print(
@@ -413,18 +373,12 @@ def main(
     tau_drive = pulse_duration_periods * laser_period
     drive_pulse = CosineSquaredPulseParameters(phi_0=-tau_drive, tau_0=tau_drive)
 
-    # Stage 2: Probe Laser Setup (counter-propagating along -z)
     probe_freq = laser_frequency / probe_wavelength_ratio
     probe_wl = laser_wavelength * probe_wavelength_ratio
     amplitude_probe = probe_a_0 * m_e * c * probe_freq / abs(q)
     waist_probe = probe_waist_lambda * laser_wavelength
 
-    if probe_polarization == "linear-x":
-        probe_pol = Polarizations.LINEAR.value
-    elif probe_polarization == "circular":
-        probe_pol = Polarizations.RIGHT_CIRCULAR.value
-    else:
-        probe_pol = Polarizations.LINEAR.value
+    probe_pol, _ = get_polarization_by_name(probe_polarization)
 
     if probe_laser_type == "gaussian":
         probe_laser = GaussianBeamParameters(
@@ -457,7 +411,6 @@ def main(
     t_coll = collision_time_periods * laser_period
     z_coll = collision_z_lambda * laser_wavelength
     tau_probe = probe_duration_periods * laser_period
-    # Probe pulse peak arrives at z_coll at t_coll
     probe_pulse = GaussianPulseParameters(phi_0=t_coll, tau_0=tau_probe)
 
     print(
@@ -467,40 +420,28 @@ def main(
         f"Collision designed at: t = {collision_time_periods:.1f} T_0, z = {collision_z_lambda:.1f} lambda_0"
     )
 
-    # Initial conditions in nanofiber
     generator = np.random.default_rng(seed)
-    if skin_depth_lambda > 0.0:
-        skin_depth = skin_depth_lambda * laser_wavelength
-        initial_positions_3d = generate_initial_positions_in_nanofiber_surface(
-            generator,
-            fiber_radius,
-            skin_depth,
-            fiber_length,
-            num_electrons,
-            z_start=0.0,
-        )
-    else:
-        initial_positions_3d = generate_initial_positions_in_nanofiber(
-            generator, fiber_radius, fiber_length, num_electrons, z_start=0.0
-        )
-
-    initial_positions = np.concatenate(
-        (np.zeros((num_electrons, 1), dtype=np.float64), initial_positions_3d), axis=-1
+    initial_positions_3d = generate_nanofiber_initial_positions(
+        generator,
+        fiber_radius,
+        fiber_length,
+        num_electrons,
+        skin_depth=skin_depth_lambda * laser_wavelength,
+        z_start=0.0,
     )
+    initial_positions = to_position_four_vectors(initial_positions_3d)
     initial_momenta = generate_initial_particle_momenta_at_rest(num_electrons, m_e)
 
     dt = laser_period / steps_per_period
     print(f"Time step dt = {dt:.4f} a.u. ({steps_per_period} steps / T_0)")
 
-    # High-frequency Doppler-upshifted radiation frequency
     omega_high = radiation_frequency_ratio * probe_freq
-    photon_energy_high_kev = (omega_high * 27.2114) / 1000.0
+    photon_energy_high_kev = (omega_high * HARTREE_TO_EV) / 1000.0
     print(
         f"High-frequency detection frequency: omega = {omega_high:.3f} a.u. ({radiation_frequency_ratio:.1f} x omega_probe)"
     )
     print(f"Upshifted photon energy: {photon_energy_high_kev:.2f} keV (X-ray regime)")
 
-    # Detector Screen Setup
     detector_z = detector_distance_lambda * laser_wavelength
     det_params = DetectorParameters(
         width=detector_width_lambda * laser_wavelength,
@@ -513,7 +454,6 @@ def main(
     )
     det_positions_jnp = jnp.asarray(det_positions_flat)
 
-    # Spectrum observer setup (placed at r ~ 0.5 lambda_0 on detector screen)
     spectrum_pos = jnp.array([0.5 * laser_wavelength, 0.0, detector_z])
     freq_min = max(0.1 * omega_high, omega_high * (1.0 - spectrum_window_fraction / 2))
     freq_max = omega_high * (1.0 + spectrum_window_fraction / 2)
@@ -526,30 +466,18 @@ def main(
     current_spectrum_E = jnp.zeros((spectrum_num_frequencies, 3), dtype=jnp.complex128)
 
     rad_start_time = radiation_start_period * laser_period
-
-    # Snapshot schedule
-    parsed_snapshots = sorted(
-        [float(s.strip()) for s in snapshot_periods.split(",") if s.strip()]
+    parsed_snapshots, schedule_times = parse_snapshot_schedule(
+        snapshot_periods, laser_period, t_final_periods
     )
-    snapshot_times = [
-        s * laser_period
-        for s in parsed_snapshots
-        if s * laser_period < t_final_periods * laser_period
-    ]
-    schedule_times = sorted(set(snapshot_times + [t_final_periods * laser_period]))
 
-    runs_directory = Path("runs")
-    if overwrite:
-        suffix = f"jz_{j_z}"
-        output_directory = runs_directory / f"two_stage_probe_collision_{suffix}"
-    else:
-        timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-        output_directory = (
-            runs_directory / f"two_stage_probe_collision_jz{j_z}_{timestamp}"
-        )
-    output_directory.mkdir(parents=True, exist_ok=True)
+    output_directory = prepare_output_directory(
+        "two_stage_probe_collision",
+        run_datetime,
+        overwrite=overwrite,
+        overwrite_suffix=f"jz_{j_z}",
+        timestamp_suffix=f"jz{j_z}",
+    )
 
-    # Save configuration
     configuration = {
         "drive_laser_a_0": a_0,
         "azimuthal_index": azimuthal_index,
@@ -568,8 +496,7 @@ def main(
         "num_electrons": num_electrons,
         "t_final_periods": t_final_periods,
     }
-    with open(output_directory / "configuration.json", "w") as file:
-        json.dump(configuration, file, indent=2, cls=ConfigurationEncoder)
+    save_json(output_directory / "configuration.json", configuration)
 
     print(
         f"[bold blue]Starting two-stage integration from t = 0 to t = {t_final_periods:.1f} T_0...[/bold blue]"
@@ -638,119 +565,50 @@ def main(
             )
 
     sim_end = perf_counter()
-    duration = sim_end - sim_start
     print(
-        f"[bold green]Two-stage simulation completed in {duration:.2f} seconds![/bold green]"
+        f"[bold green]Two-stage simulation completed in {sim_end - sim_start:.2f} seconds![/bold green]"
     )
 
-    # Snapshot plots
     print("Generating bunch snapshot plots...")
-    for snap in recorded_snapshots:
-        t_label = f"{snap.time:.1f}T0"
-        pos_np = np.asarray(snap.positions)
-        mom_np = np.asarray(snap.momenta)
-
-        # 1. Microbunching spatial distribution
-        fig = plt.figure(dpi=200)
-        plot_microbunching_spatial_distribution(
-            fig,
-            pos_np,
-            laser_wavelength,
-            fiber_radius,
-            fiber_length,
-            title=f"Electron bunches at $t = {snap.time:.0f} T_0$ ($j_z = {j_z}$)",
-        )
-        fig.savefig(output_directory / f"microbunching_spatial_{t_label}.png")
-        plt.close(fig)
-
-        # 2. Phase space (z, p_z)
-        fig = plt.figure(dpi=200)
-        plot_bunch_phase_space(
-            fig,
-            pos_np,
-            mom_np,
-            laser_wavelength,
-            title=f"Phase space $(z, p_z)$ at $t = {snap.time:.0f} T_0$",
-        )
-        fig.savefig(output_directory / f"phase_space_{t_label}.png")
-        plt.close(fig)
-
-        # 3. Transverse profile (x, y)
-        fig = plt.figure(dpi=200)
-        plot_transverse_bunch_profile(
-            fig,
-            pos_np,
-            laser_wavelength,
-            waist_drive,
-            title=f"Transverse distribution at $t = {snap.time:.0f} T_0$ ($j_z = {j_z}$)",
-        )
-        fig.savefig(output_directory / f"transverse_profile_{t_label}.png")
-        plt.close(fig)
-
-    # Final state electron diagnostics
-    final_pos_np = np.asarray(current_positions)
-    final_mom_np = np.asarray(current_momenta)
-
-    # 4. Energy spectrum
-    fig = plt.figure(dpi=200)
-    plot_energy_spectrum(
-        fig,
-        final_mom_np,
-        title=f"Electron energy spectrum at $t = {t_final_periods:.0f} T_0$",
-    )
-    fig.savefig(output_directory / "final_energy_spectrum.png")
-    plt.close(fig)
-
-    # 5. Transverse vortex velocity field
-    fig = plt.figure(dpi=200)
-    plot_transverse_velocity_vortex(
-        fig,
-        final_pos_np,
-        final_mom_np,
+    save_nanofiber_snapshot_plots(
+        output_directory,
+        recorded_snapshots,
         laser_wavelength,
-        title=f"Transverse velocity field at $t = {t_final_periods:.0f} T_0$ ($j_z = {j_z}$)",
+        fiber_radius,
+        fiber_length,
+        waist_drive,
+        j_z,
     )
-    fig.savefig(output_directory / "transverse_vortex.png")
-    plt.close(fig)
 
-    # 6. BAM evolution
-    if all_lz_history:
-        total_lz = np.concatenate(all_lz_history)
-        t_axis = np.linspace(0, t_final_periods * laser_period, len(total_lz))
-        fig = plt.figure(dpi=200)
-        plot_beam_angular_momentum_evolution(
-            fig,
-            t_axis,
-            total_lz,
-            laser_period,
-            title=f"Electron BAM $\\mathcal{{L}}_z$ evolution ($j_z = {j_z}$)",
-        )
-        fig.savefig(output_directory / "bam_evolution.png")
-        plt.close(fig)
+    save_nanofiber_final_plots(
+        output_directory,
+        np.asarray(current_positions),
+        np.asarray(current_momenta),
+        all_lz_history,
+        laser_wavelength,
+        laser_period,
+        t_final_periods,
+        j_z,
+    )
 
-    # 7. High-frequency Doppler-upshifted radiation analysis
     if compute_radiation:
         print(
             "[bold blue]Analyzing high-frequency Doppler-upshifted radiation on detector...[/bold blue]"
         )
         current_detector_E.block_until_ready()
-        det_pos_2d = np.asarray(det_positions_flat).reshape(
-            detector_grid_size, detector_grid_size, 3
-        )
-        det_E_2d = np.asarray(current_detector_E).reshape(
-            detector_grid_size, detector_grid_size, 3
-        )
-        det_B_2d = np.asarray(current_detector_B).reshape(
-            detector_grid_size, detector_grid_size, 3
-        )
+        det_pos_2d = det_params.reshape_to_grid(np.asarray(det_positions_flat))
+        det_E_2d = det_params.reshape_to_grid(np.asarray(current_detector_E))
+        det_B_2d = det_params.reshape_to_grid(np.asarray(current_detector_B))
 
-        # Compute radiated OAM density flux dL_z / dV
         dL_z = compute_angular_momentum_derivative(det_pos_2d, det_E_2d, omega_high)
         total_radiated_Lz = float(np.sum(np.real(dL_z)))
-        print(f"Total high-frequency radiated OAM L_z^EM: {total_radiated_Lz:.6e} a.u.")
-        print(f"Max radiation |E_det|: {np.max(np.linalg.norm(det_E_2d, axis=-1)):.6e}")
+        print(
+            f"Total high-frequency radiated OAM L_z^EM: {total_radiated_Lz:.6e} a.u."
+        )
+        print(
+            f"Max radiation |E_det|: {np.max(np.linalg.norm(det_E_2d, axis=-1)):.6e}"
+        )
 
-        # Plot 3-panel detector pattern: Intensity, Phase, OAM Density
         fig = plt.figure(dpi=200)
         plot_detector_radiation_and_oam(
             fig,
@@ -760,19 +618,21 @@ def main(
             laser_wavelength,
             title=f"X-ray radiation at $\\hbar\\omega = {photon_energy_high_kev:.2f}\\text{{ keV}}$ ($j_z = {j_z}$)",
         )
-        fig.savefig(output_directory / "high_freq_detector_radiation_and_oam.png")
-        fig.savefig(output_directory / "high_freq_detector_radiation_and_oam.pdf")
-        plt.close(fig)
+        save_figure(
+            fig,
+            output_directory / "high_freq_detector_radiation_and_oam",
+            formats=("png", "pdf"),
+        )
 
-        # Plot high-frequency radiation spectrum
         spec_E_np = np.asarray(current_spectrum_E)
         fig = plt.figure(dpi=200)
         plot_scattered_radiation_spectrum(fig, omega_high, frequencies_np, spec_E_np)
-        fig.savefig(output_directory / "high_freq_radiation_spectrum.pdf")
-        fig.savefig(output_directory / "high_freq_radiation_spectrum.png")
-        plt.close(fig)
+        save_figure(
+            fig,
+            output_directory / "high_freq_radiation_spectrum",
+            formats=("pdf", "png"),
+        )
 
-        # Save numpy data
         np.save(output_directory / "detector_positions.npy", det_pos_2d)
         np.save(output_directory / "detector_electric_field.npy", det_E_2d)
         np.save(output_directory / "detector_magnetic_field.npy", det_B_2d)
@@ -796,12 +656,7 @@ def main(
             "collision_time_periods": collision_time_periods,
             "collision_z_lambda": collision_z_lambda,
         }
-        with open(output_directory / "two_stage_summary.json", "w") as f:
-            json.dump(summary, f, indent=2)
-
-    print(
-        f"[bold green]All two-stage results and figures saved to: '{output_directory}'[/bold green]"
-    )
+        save_json(output_directory / "two_stage_summary.json", summary)
 
 
 if __name__ == "__main__":

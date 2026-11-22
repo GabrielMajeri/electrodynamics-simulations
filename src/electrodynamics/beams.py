@@ -33,24 +33,6 @@ class GaussianBeamParameters(LaserParameters):
     waist_radius: float
     exact_paraxial: bool = True
 
-    def __init__(
-        self,
-        frequency: float,
-        wavelength: float,
-        amplitude: float,
-        polarization: Polarization,
-        waist_radius: float,
-        exact_paraxial: bool = True,
-    ) -> None:
-        # Use `object.__setattr__` since data classes are "frozen"
-        # and regular attribute assignment doesn't work.
-        object.__setattr__(self, "frequency", frequency)
-        object.__setattr__(self, "wavelength", wavelength)
-        object.__setattr__(self, "amplitude", amplitude)
-        object.__setattr__(self, "polarization", polarization)
-        object.__setattr__(self, "waist_radius", waist_radius)
-        object.__setattr__(self, "exact_paraxial", exact_paraxial)
-
 
 @jdc.pytree_dataclass
 class LaguerreGaussBeamParameters(GaussianBeamParameters):
@@ -174,9 +156,10 @@ def compute_gaussian_beam_fields(
     use_exact = parameters.exact_paraxial if exact_paraxial is None else exact_paraxial
 
     if not use_exact:
-        # Fast approximation: differentiate only the Gaussian exp(-r^2/w_z^2) envelope
+        # Fast approximation: differentiate only the Gaussian $exp(-r^2/w_z^2)$ envelope
         E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)
         B_z = (2j) / (parameters.frequency * w_z**2) * (y * E_x - x * E_y)
+
     else:
         # Exact transverse derivatives including wavefront curvature:
         # d/dx u = -x * (2 / w_z^2 + i * k / R(z)) * u
@@ -283,6 +266,7 @@ def compute_laguerre_gauss_beam_fields(
         # Fast approximation: differentiate only the Gaussian exp(-r^2/w_z^2) envelope
         E_z = (2j) / (wave_number * w_z**2) * (x * E_x + y * E_y)
         B_z = (2j) / (parameters.frequency * w_z**2) * (y * E_x - x * E_y)
+
     else:
         # Exact transverse paraxial derivatives
         dL_val = laguerre_polynomial_derivative(p, abs_l, xi)
@@ -340,6 +324,22 @@ def laguerre_polynomial_derivative(
 
 
 @jdc.jit
+def compute_beam_fields(
+    parameters: jdc.Static[
+        LaserParameters | GaussianBeamParameters | LaguerreGaussBeamParameters
+    ],
+    position: jax.Array,
+    exact_paraxial: jdc.Static[bool] | None = None,
+) -> EMField:
+    """Dispatches electric and magnetic field evaluation based on the beam parameter type."""
+    if isinstance(parameters, LaguerreGaussBeamParameters):
+        return compute_laguerre_gauss_beam_fields(parameters, position, exact_paraxial)
+    if isinstance(parameters, GaussianBeamParameters):
+        return compute_gaussian_beam_fields(parameters, position, exact_paraxial)
+    return compute_plane_wave_fields(parameters, position)
+
+
+@jdc.jit
 def compute_directional_beam_fields(
     parameters: jdc.Static[
         LaserParameters | GaussianBeamParameters | LaguerreGaussBeamParameters
@@ -355,28 +355,14 @@ def compute_directional_beam_fields(
     assert propagation_direction in (1, -1), "propagation_direction must be +1 or -1"
 
     if propagation_direction == 1 and focal_position == 0.0:
-        if isinstance(parameters, LaguerreGaussBeamParameters):
-            return compute_laguerre_gauss_beam_fields(
-                parameters, position, exact_paraxial
-            )
-        elif isinstance(parameters, GaussianBeamParameters):
-            return compute_gaussian_beam_fields(parameters, position, exact_paraxial)
-        else:
-            return compute_plane_wave_fields(parameters, position)
+        return compute_beam_fields(parameters, position, exact_paraxial)
 
     s = propagation_direction
     ct, x, y, z = position.T
     z_prime = s * (z - focal_position)
     pos_prime = jnp.vstack([ct, x, y, z_prime]).T
 
-    if isinstance(parameters, LaguerreGaussBeamParameters):
-        em_prime = compute_laguerre_gauss_beam_fields(
-            parameters, pos_prime, exact_paraxial
-        )
-    elif isinstance(parameters, GaussianBeamParameters):
-        em_prime = compute_gaussian_beam_fields(parameters, pos_prime, exact_paraxial)
-    else:
-        em_prime = compute_plane_wave_fields(parameters, pos_prime)
+    em_prime = compute_beam_fields(parameters, pos_prime, exact_paraxial)
 
     E_p = em_prime.electric_field
     B_p = em_prime.magnetic_field
@@ -403,14 +389,7 @@ def compute_oblique_beam_fields(
     When `incidence_angle == 0`, reduces identically to propagation along +z.
     """
     if incidence_angle == 0.0:
-        if isinstance(parameters, LaguerreGaussBeamParameters):
-            return compute_laguerre_gauss_beam_fields(
-                parameters, position, exact_paraxial
-            )
-        elif isinstance(parameters, GaussianBeamParameters):
-            return compute_gaussian_beam_fields(parameters, position, exact_paraxial)
-        else:
-            return compute_plane_wave_fields(parameters, position)
+        return compute_beam_fields(parameters, position, exact_paraxial)
 
     cos_t = jnp.cos(incidence_angle)
     sin_t = jnp.sin(incidence_angle)
@@ -421,12 +400,7 @@ def compute_oblique_beam_fields(
     z_b = x * sin_t + z * cos_t
     pos_b = jnp.vstack([ct, x_b, y_b, z_b]).T
 
-    if isinstance(parameters, LaguerreGaussBeamParameters):
-        em_b = compute_laguerre_gauss_beam_fields(parameters, pos_b, exact_paraxial)
-    elif isinstance(parameters, GaussianBeamParameters):
-        em_b = compute_gaussian_beam_fields(parameters, pos_b, exact_paraxial)
-    else:
-        em_b = compute_plane_wave_fields(parameters, pos_b)
+    em_b = compute_beam_fields(parameters, pos_b, exact_paraxial)
 
     E_b = em_b.electric_field
     B_b = em_b.magnetic_field

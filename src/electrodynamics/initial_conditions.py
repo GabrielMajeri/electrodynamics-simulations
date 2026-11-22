@@ -3,6 +3,21 @@ import numpy as np
 from electrodynamics.constants import SPEED_OF_LIGHT as c
 
 
+def to_position_four_vectors(positions_3d: np.ndarray, ct: float = 0.0) -> np.ndarray:
+    "Prepends the time coordinate `ct` to `(N, 3)` spatial positions to form `(N, 4)` 4-vectors."
+    times = np.full((len(positions_3d), 1), ct, dtype=np.float64)
+    return np.concatenate((times, positions_3d), axis=-1)
+
+
+def _sample_annulus_xy(
+    generator: np.random.Generator, r_min: float, r_max: float, num_particles: int
+) -> tuple[np.ndarray, np.ndarray]:
+    "Uniformly samples 2D `(x, y)` coordinates in an annulus `r_min <= r <= r_max`."
+    radii = np.sqrt(generator.uniform(low=r_min**2, high=r_max**2, size=num_particles))
+    angles = generator.uniform(low=0.0, high=2 * np.pi, size=num_particles)
+    return radii * np.cos(angles), radii * np.sin(angles)
+
+
 def generate_initial_positions_uniformly_on_disk(
     generator: np.random.Generator, disk_radius: float, num_particles: int
 ) -> np.ndarray:
@@ -12,13 +27,9 @@ def generate_initial_positions_uniformly_on_disk(
     The disk lies in the x-y plane, described by z = 0.
     """
     positions = np.zeros((num_particles, 3), dtype=np.float64)
-
-    radii = np.sqrt(generator.uniform(low=0.0, high=disk_radius**2, size=num_particles))
-    angles = generator.uniform(low=0.0, high=2 * np.pi, size=num_particles)
-
-    positions[:, 0] = radii * np.cos(angles)
-    positions[:, 1] = radii * np.sin(angles)
-
+    positions[:, 0], positions[:, 1] = _sample_annulus_xy(
+        generator, 0.0, disk_radius, num_particles
+    )
     return positions
 
 
@@ -26,7 +37,6 @@ def generate_initial_positions_uniformly_within_ball(
     generator: np.random.Generator, ball_radius: float, num_particles: int
 ) -> np.ndarray:
     """Generates uniformly distributed points within the zero-centered ball of given radius."""
-    # We work in 3D
     dimension = 3
 
     # Sample a set of vectors from multivariate standard normal distribution
@@ -37,28 +47,12 @@ def generate_initial_positions_uniformly_within_ball(
         np.linalg.vector_norm(random_vectors, axis=-1), axis=-1
     )
 
-    # Scale them by some random radii, sampled proportionally
-    # to the surface area of the corresponding sphere
+    # Scale them by random radii sampled proportionally to spherical shell volume
     random_radii = ball_radius * generator.uniform(
         low=0.0, high=1, size=(num_particles, 1)
     ) ** (1 / dimension)
 
     return random_radii * random_unit_vectors
-
-
-def generate_initial_particle_momenta_moving_towards_laser(
-    num_particles: int, gamma: float, particle_mass: float
-) -> np.ndarray:
-    """Generates initial momenta for a bunch of particles
-    moving relativistically towards the negative z axis.
-    """
-
-    initial_momenta = np.zeros(shape=(num_particles, 4), dtype=np.float64)
-
-    initial_momenta[:, 0] = gamma * particle_mass * c
-    initial_momenta[:, 3] = -np.sqrt(gamma**2 - 1) * particle_mass * c
-
-    return initial_momenta
 
 
 def generate_initial_particle_momenta_moving_in_direction(
@@ -67,7 +61,6 @@ def generate_initial_particle_momenta_moving_in_direction(
     """Generates initial momenta for a bunch of particles
     moving relativistically in a given direction.
     """
-
     initial_momenta = np.zeros(shape=(num_particles, 4), dtype=np.float64)
 
     normalized_direction = direction / np.linalg.norm(direction)
@@ -78,6 +71,17 @@ def generate_initial_particle_momenta_moving_in_direction(
     )
 
     return initial_momenta
+
+
+def generate_initial_particle_momenta_moving_towards_laser(
+    num_particles: int, gamma: float, particle_mass: float
+) -> np.ndarray:
+    """Generates initial momenta for a bunch of particles
+    moving relativistically towards the negative z axis.
+    """
+    return generate_initial_particle_momenta_moving_in_direction(
+        num_particles, gamma, particle_mass, np.array([0.0, 0.0, -1.0])
+    )
 
 
 def generate_initial_positions_in_nanofiber(
@@ -92,17 +96,12 @@ def generate_initial_positions_in_nanofiber(
     The fiber spans from z = z_start to z = z_start + fiber_length.
     """
     positions = np.zeros((num_particles, 3), dtype=np.float64)
-
-    radii = np.sqrt(
-        generator.uniform(low=0.0, high=fiber_radius**2, size=num_particles)
+    positions[:, 0], positions[:, 1] = _sample_annulus_xy(
+        generator, 0.0, fiber_radius, num_particles
     )
-    angles = generator.uniform(low=0.0, high=2 * np.pi, size=num_particles)
-    zs = generator.uniform(low=z_start, high=z_start + fiber_length, size=num_particles)
-
-    positions[:, 0] = radii * np.cos(angles)
-    positions[:, 1] = radii * np.sin(angles)
-    positions[:, 2] = zs
-
+    positions[:, 2] = generator.uniform(
+        low=z_start, high=z_start + fiber_length, size=num_particles
+    )
     return positions
 
 
@@ -117,18 +116,46 @@ def generate_initial_positions_in_nanofiber_surface(
     """Generates uniformly distributed points within the surface skin layer of a cylindrical nanofiber."""
     positions = np.zeros((num_particles, 3), dtype=np.float64)
     r_min = max(0.0, fiber_radius - skin_depth)
-
-    radii = np.sqrt(
-        generator.uniform(low=r_min**2, high=fiber_radius**2, size=num_particles)
+    positions[:, 0], positions[:, 1] = _sample_annulus_xy(
+        generator, r_min, fiber_radius, num_particles
     )
-    angles = generator.uniform(low=0.0, high=2 * np.pi, size=num_particles)
-    zs = generator.uniform(low=z_start, high=z_start + fiber_length, size=num_particles)
-
-    positions[:, 0] = radii * np.cos(angles)
-    positions[:, 1] = radii * np.sin(angles)
-    positions[:, 2] = zs
-
+    positions[:, 2] = generator.uniform(
+        low=z_start, high=z_start + fiber_length, size=num_particles
+    )
     return positions
+
+
+def generate_nanofiber_initial_positions(
+    generator: np.random.Generator,
+    fiber_radius: float,
+    fiber_length: float,
+    num_particles: int,
+    skin_depth: float = 0.0,
+    z_start: float = 0.0,
+) -> np.ndarray:
+    """Generates initial 3D positions in a nanofiber volume or surface skin layer
+    (when `skin_depth > 0`).
+
+    The nanofiber is oriented along the z axis,
+    spanning from $z_start$ to $z_end = z_start + fiber_length$.
+    """
+    if skin_depth > 0.0:
+        return generate_initial_positions_in_nanofiber_surface(
+            generator,
+            fiber_radius,
+            skin_depth,
+            fiber_length,
+            num_particles,
+            z_start=z_start,
+        )
+
+    return generate_initial_positions_in_nanofiber(
+        generator,
+        fiber_radius,
+        fiber_length,
+        num_particles,
+        z_start=z_start,
+    )
 
 
 def generate_initial_particle_momenta_at_rest(
@@ -162,7 +189,7 @@ def generate_initial_positions_on_thin_sheet(
     positions = np.zeros((num_particles, 3), dtype=np.float64)
 
     if sampling_method == "polar-grid":
-        # Factor num_particles into (num_radial, num_azimuthal) with num_azimuthal >= 16 if possible
+        # Factor num_particles into (num_radial, num_azimuthal) with num_azimuthal >= 8 if possible
         target_azimuthal = max(8, round(np.sqrt(2.0 * num_particles)))
         best_n_phi = 1
         min_diff = num_particles
@@ -199,12 +226,9 @@ def generate_initial_positions_on_thin_sheet(
     elif sampling_method == "random":
         if generator is None:
             generator = np.random.default_rng(42)
-        radii = np.sqrt(
-            generator.uniform(low=0.0, high=disk_radius**2, size=num_particles)
+        positions[:, 0], positions[:, 1] = _sample_annulus_xy(
+            generator, 0.0, disk_radius, num_particles
         )
-        angles = generator.uniform(low=0.0, high=2.0 * np.pi, size=num_particles)
-        positions[:, 0] = radii * np.cos(angles)
-        positions[:, 1] = radii * np.sin(angles)
 
     else:
         raise ValueError(

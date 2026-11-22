@@ -5,7 +5,7 @@ Following Chen et al., Scientific Reports 12:12524 (2022).
 """
 
 import json
-from math import cos, sin
+from math import cos, sin, sqrt
 from pathlib import Path
 from typing import Annotated
 
@@ -14,6 +14,8 @@ import numpy as np
 import typer
 
 from electrodynamics.fields import compute_relativistic_reflection_parameters
+from electrodynamics.plotting import save_figure
+from electrodynamics.serialization import save_json
 
 
 def compute_oam_tilt_angle_chen(
@@ -72,7 +74,7 @@ def generate_extended_diagnostics(
         cfg = json.load(f)
 
     gamma = float(cfg["gamma"])
-    beta = 1 - 1 / np.sqrt(gamma**2)
+    beta = float(cfg["beta"]) if "beta" in cfg else sqrt(1.0 - 1.0 / (gamma**2))
     theta_in_deg = float(cfg["incidence_angle_deg"])
     theta_in = float(cfg["incidence_angle_rad"])
 
@@ -294,9 +296,11 @@ def generate_extended_diagnostics(
     ax1.legend(loc="upper left", fontsize=8, ncol=2)
 
     fig.tight_layout()
-    fig.savefig(output_dir / "extended_oam_noncollinearity_geometry.png")
-    fig.savefig(output_dir / "extended_oam_noncollinearity_geometry.pdf")
-    plt.close(fig)
+    save_figure(
+        fig,
+        output_dir / "extended_oam_noncollinearity_geometry",
+        formats=("png", "pdf"),
+    )
 
     # -------------------------------------------------------------
     # Diagnostic Figure 2: Transverse vs Longitudinal OAM on Detector
@@ -372,9 +376,11 @@ def generate_extended_diagnostics(
     fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
     fig.tight_layout()
-    fig.savefig(output_dir / "extended_oam_detector_decomposition.png")
-    fig.savefig(output_dir / "extended_oam_detector_decomposition.pdf")
-    plt.close(fig)
+    save_figure(
+        fig,
+        output_dir / "extended_oam_detector_decomposition",
+        formats=("png", "pdf"),
+    )
 
     # Save detailed summary json
     summary_data = {
@@ -392,8 +398,7 @@ def generate_extended_diagnostics(
         "transverse_to_longitudinal_ratio": float(np.tan(theta_tilt)),
         "total_longitudinal_OAM_au": total_Lz,
     }
-    with open(output_dir / "extended_oam_diagnostics_summary.json", "w") as f:
-        json.dump(summary_data, f, indent=2)
+    save_json(output_dir / "extended_oam_diagnostics_summary.json", summary_data)
 
     print(f"Generated extended diagnostics in {output_dir}")
     print(f"  Reflection angle theta_re = {np.degrees(theta_re):.2f} deg")

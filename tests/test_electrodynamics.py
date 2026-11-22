@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
 import jax.numpy as jnp
 import numpy as np
 
@@ -12,16 +15,25 @@ from electrodynamics.constants import (
     SPEED_OF_LIGHT as c,
 )
 from electrodynamics.fields import (
+    compute_coherent_detector_and_spectrum_fields,
     compute_doppler_shift_factor,
     compute_relativistic_reflection_parameters,
     compute_scattered_electric_and_magnetic_fields,
 )
-from electrodynamics.integrate import integration_step_rk4_lab_time
-from electrodynamics.polarization import Polarizations
+from electrodynamics.integrate import (
+    integration_step_rk4_lab_time,
+    parse_snapshot_schedule,
+)
+from electrodynamics.polarization import (
+    Polarizations,
+    get_polarization_by_name,
+    resolve_circular_polarization,
+)
 from electrodynamics.pulse import (
     CosineSquaredPulseParameters,
     cosine_squared_envelope,
 )
+from electrodynamics.serialization import prepare_output_directory, save_json
 
 
 def test_constants() -> None:
@@ -163,3 +175,59 @@ def test_scattered_fields_unaccelerated_relativistic_particle_zero(jax_config) -
     )
     np.testing.assert_allclose(E_prop, 0.0, atol=1e-15)
     np.testing.assert_allclose(B_prop, 0.0, atol=1e-15)
+
+
+def test_polarization_helpers() -> None:
+    pol_lin, sig_lin = get_polarization_by_name("linear-x")
+    assert pol_lin == Polarizations.LINEAR_X.value
+    assert sig_lin == 0
+
+    pol_ly, sig_ly = get_polarization_by_name("linear-y")
+    assert pol_ly.x == 0.0 and pol_ly.y == 1.0
+    assert sig_ly == 0
+
+    pol_opp, sig_opp = resolve_circular_polarization(
+        azimuthal_index=1, handedness="opposite"
+    )
+    assert pol_opp == Polarizations.RIGHT_CIRCULAR.value
+    assert sig_opp == -1
+
+    pol_same, sig_same = resolve_circular_polarization(
+        azimuthal_index=1, handedness="same"
+    )
+    assert pol_same == Polarizations.LEFT_CIRCULAR.value
+    assert sig_same == 1
+
+
+def test_snapshot_schedule_and_serialization(tmp_path: Path) -> None:
+    parsed, schedule = parse_snapshot_schedule(
+        "20.0, 10.0, 40.0", laser_period=10.0, t_final_periods=35.0
+    )
+    assert parsed == [10.0, 20.0, 40.0]
+    np.testing.assert_allclose(schedule, [100.0, 200.0, 350.0])
+
+    dt = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    out_dir = prepare_output_directory("study", dt, overwrite=True, runs_root=tmp_path)
+    assert out_dir == tmp_path / "study_latest"
+    assert out_dir.is_dir()
+
+    save_json(
+        out_dir / "cfg.json", {"arr": np.array([1.0, 2.0]), "scalar": np.float64(3.5)}
+    )
+    assert (out_dir / "cfg.json").exists()
+
+
+def test_coherent_detector_and_spectrum_helper(jax_config) -> None:
+    pos = jnp.array([[0.0, 1.0, 2.0, 0.0], [0.0, -1.0, 0.5, 0.0]])
+    mom = jnp.array([[c, 0.1, 0.0, 0.0], [c, -0.1, 0.2, 0.0]])
+    orig = jnp.array([[0.0, 1.0, 2.0, 0.0], [0.0, -1.0, 0.5, 0.0]])
+    det_pos = jnp.array([[0.0, 0.0, -500.0], [10.0, 0.0, -500.0]])
+    spec_pos = jnp.array([5.0, 0.0, -500.0])
+    freqs = jnp.array([0.05, 0.06, 0.07])
+
+    dE, dB, dE_spec = compute_coherent_detector_and_spectrum_fields(
+        pos, mom, orig, det_pos, 0.057, spec_pos, freqs, is_lab_time=True
+    )
+    assert dE.shape == (2, 3)
+    assert dB.shape == (2, 3)
+    assert dE_spec.shape == (3, 3)
