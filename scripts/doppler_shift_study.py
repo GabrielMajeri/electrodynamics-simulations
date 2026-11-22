@@ -185,8 +185,13 @@ def simulate_trajectories(
         (num_frequencies, 3), dtype=jnp.complex128
     )
 
-    for index, _num_batches, batch_positions, batch_momenta in (
-        iterate_sharded_particle_batches(initial_positions, initial_momenta, batch_size)
+    for (
+        index,
+        _num_batches,
+        batch_positions,
+        batch_momenta,
+    ) in iterate_sharded_particle_batches(
+        initial_positions, initial_momenta, batch_size
     ):
         print(f"Batch #{index}")
         (

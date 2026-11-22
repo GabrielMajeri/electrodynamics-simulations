@@ -272,8 +272,13 @@ def simulate_trajectories(
         (len(detector_positions), 3), dtype=jnp.complex128
     )
 
-    for index, _num_batches, batch_positions, batch_momenta in (
-        iterate_sharded_particle_batches(initial_positions, initial_momenta, batch_size)
+    for (
+        index,
+        _num_batches,
+        batch_positions,
+        batch_momenta,
+    ) in iterate_sharded_particle_batches(
+        initial_positions, initial_momenta, batch_size
     ):
         print(f"Batch #{index}")
         (
@@ -341,10 +346,22 @@ def main(
         ),
     ] = -2,
     a_0: Annotated[float, typer.Option(help="Normalized laser intensity")] = 1e-1,
+    exact_paraxial: Annotated[
+        bool,
+        typer.Option(
+            help="Use exact paraxial derivatives for longitudinal EM fields (`E_z`, `B_z`) instead of envelope-only approximation."
+        ),
+    ] = True,
     gamma: Annotated[float, typer.Option(help="Electrons' relativistic factor")] = 1,
     num_electrons: Annotated[
         int, typer.Option(help="Number of electrons to simulate")
     ] = 1024,
+    target_type: Annotated[
+        str,
+        typer.Option(
+            help="Geometry for initial electron distribution: 'disk', 'thin-sheet', 'ball', or 'nanofiber'."
+        ),
+    ] = "disk",
     batch_size: Annotated[
         int, typer.Option(help="Number of electrons to simulate in each batch")
     ] = 512,
@@ -360,18 +377,6 @@ def main(
             help="Overwrite last run instead of creating a new directory, indexed with the timestamp of the current run."
         ),
     ] = False,
-    exact_paraxial: Annotated[
-        bool,
-        typer.Option(
-            help="Use exact paraxial derivatives for longitudinal EM fields (`E_z`, `B_z`) instead of envelope-only approximation."
-        ),
-    ] = True,
-    target_type: Annotated[
-        str,
-        typer.Option(
-            help="Geometry for initial electron distribution: 'disk', 'thin-sheet', 'ball', or 'nanofiber'."
-        ),
-    ] = "disk",
 ) -> None:
     """Simulates a Laguerre-Gauss laser pulse hitting a bunch of electrons moving at relativistic speeds.
     The scattered radiation is Doppler-shifted to much higher frequencies.
@@ -496,6 +501,8 @@ def main(
     configuration = {
         "laser_parameters": laser_parameters,
         "pulse_parameters": pulse_parameters,
+        "num_electrons": num_electrons,
+        "target_type": target_type,
         "electrons_initial_gamma": gamma,
         "time_start": integration_start_time,
         "time_end": integration_end_time,
@@ -516,7 +523,7 @@ def main(
         detector_parameters,
         np.asarray(detector_positions),
     )
-    save_figure(fig, output_directory / "experimental_setup")
+    save_figure(fig, output_directory / "experimental_setup", formats=("pdf",))
 
     print("Starting simulation")
     start_time = perf_counter()

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 def save_figure(
     fig: Figure,
     stem: Path,
-    formats: Sequence[str] = ("png",),
+    formats: Sequence[str] = ("pdf",),
     close: bool = True,
 ) -> None:
     "Saves `fig` to `{stem}.{ext}` for each extension in `formats` and optionally closes it."
@@ -116,7 +116,13 @@ def plot_experimental_setup(
     ax = fig.add_subplot(1, 2, 2, projection="3d", computed_zorder=False)
     ax.set_title("Detector, laser beam and particles")
 
-    ax.scatter3D(positions[:, 0], positions[:, 1], positions[:, 2], s=3)  # pyright: ignore[reportArgumentType]
+    ax.scatter3D(
+        positions[:, 0],
+        positions[:, 1],
+        positions[:, 2],  # pyright: ignore[reportArgumentType]
+        s=3,
+        rasterized=True,
+    )
 
     detector_grid = detector_parameters.reshape_to_grid(detector_positions)
 
@@ -128,6 +134,7 @@ def plot_experimental_setup(
         lw=0.5,
         alpha=0.3,
         zorder=1,
+        rasterized=True,
     )
 
     detector_z = detector_positions[0, 2]
@@ -176,6 +183,7 @@ def _plot_normalized_transverse_distribution(
         c=compressed_values,
         cmap="bwr",
         s=3,
+        rasterized=True,
     )
 
     fig.colorbar(p)

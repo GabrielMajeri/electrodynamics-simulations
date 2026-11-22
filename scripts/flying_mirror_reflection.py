@@ -275,8 +275,13 @@ def simulate_flying_mirror(
         (len(detector_positions),), dtype=jnp.float64
     )
 
-    for index, num_batches, batch_positions, batch_momenta in (
-        iterate_sharded_particle_batches(initial_positions, initial_momenta, batch_size)
+    for (
+        index,
+        num_batches,
+        batch_positions,
+        batch_momenta,
+    ) in iterate_sharded_particle_batches(
+        initial_positions, initial_momenta, batch_size
     ):
         print(f"Batch #{index + 1}/{num_batches}")
         (
@@ -606,7 +611,7 @@ def main(
         "flying_mirror",
         run_datetime,
         overwrite=overwrite,
-        overwrite_suffix=f"theta{round(incidence_angle_deg)}_latest",
+        overwrite_run_tag=f"theta_{round(incidence_angle_deg)}deg_latest",
         run_tag=run_tag,
     )
 

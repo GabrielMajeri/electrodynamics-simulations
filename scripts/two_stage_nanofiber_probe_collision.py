@@ -474,7 +474,7 @@ def main(
         "two_stage_probe_collision",
         run_datetime,
         overwrite=overwrite,
-        overwrite_suffix=f"jz_{j_z}",
+        overwrite_run_tag=f"jz_{j_z}",
         timestamp_suffix=f"jz{j_z}",
     )
 
@@ -602,12 +602,8 @@ def main(
 
         dL_z = compute_angular_momentum_derivative(det_pos_2d, det_E_2d, omega_high)
         total_radiated_Lz = float(np.sum(np.real(dL_z)))
-        print(
-            f"Total high-frequency radiated OAM L_z^EM: {total_radiated_Lz:.6e} a.u."
-        )
-        print(
-            f"Max radiation |E_det|: {np.max(np.linalg.norm(det_E_2d, axis=-1)):.6e}"
-        )
+        print(f"Total high-frequency radiated OAM L_z^EM: {total_radiated_Lz:.6e} a.u.")
+        print(f"Max radiation |E_det|: {np.max(np.linalg.norm(det_E_2d, axis=-1)):.6e}")
 
         fig = plt.figure(dpi=200)
         plot_detector_radiation_and_oam(

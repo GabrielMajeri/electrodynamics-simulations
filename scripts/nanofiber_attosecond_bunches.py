@@ -353,7 +353,7 @@ def main(
         "nanofiber_attosecond_bunches",
         run_datetime,
         overwrite=overwrite,
-        overwrite_suffix=f"jz_{j_z}",
+        overwrite_run_tag=f"jz_{j_z}",
         timestamp_suffix=f"jz{j_z}",
     )
 
@@ -531,7 +531,9 @@ def main(
         fig = plt.figure(dpi=200)
         plot_scattered_radiation_spectrum(fig, rad_freq, frequencies_np, spec_E_np)
         save_figure(
-            fig, output_directory / "scattered_radiation_spectrum", formats=("pdf", "png")
+            fig,
+            output_directory / "scattered_radiation_spectrum",
+            formats=("pdf", "png"),
         )
 
         np.save(output_directory / "detector_positions.npy", det_pos_2d)
