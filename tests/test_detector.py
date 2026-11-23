@@ -4,8 +4,11 @@ import pytest
 
 from electrodynamics.angular_momentum import (
     compute_angular_momentum_derivative,
+    compute_oam_per_photon,
     compute_particle_angular_momentum_z,
+    integrate_detector_oam_spectral_density,
 )
+from electrodynamics.constants import SPEED_OF_LIGHT
 from electrodynamics.detector import (
     DetectorParameters,
     initialize_detector_positions,
@@ -37,28 +40,47 @@ def test_detector_positions_generation() -> None:
 
 
 def test_angular_momentum_derivative() -> None:
-    from electrodynamics.angular_momentum import compute_angular_momentum_derivative
-
-    params = DetectorParameters(width=20.0, height=20.0, grid_size_x=16, grid_size_y=16)
-    pos_flat = initialize_detector_positions_negative_z(params, 100.0)
+    params = DetectorParameters(width=20.0, height=20.0, grid_size_x=64, grid_size_y=64)
+    pos_flat = initialize_detector_positions_negative_z(params, -100.0)
     pos_2d = pos_flat.reshape(params.grid_size_x, params.grid_size_y, 3)
 
     omega = 0.057
     x = pos_2d[:, :, 0]
     y = pos_2d[:, :, 1]
     r2 = x**2 + y**2
+    w2 = 2.5**2
 
     # Case 1: Axisymmetric field -> zero net orbital angular momentum
     field_axisym = np.zeros_like(pos_2d, dtype=np.complex128)
-    field_axisym[:, :, 0] = np.exp(-r2 / 10.0)
+    field_axisym[:, :, 0] = np.exp(-r2 / w2)
     dL_z_sym = compute_angular_momentum_derivative(pos_2d, field_axisym, omega)
-    assert np.abs(np.sum(np.real(dL_z_sym))) < 1e-12
+    assert abs(integrate_detector_oam_spectral_density(pos_2d, dL_z_sym)) < 1e-12
+    assert abs(compute_oam_per_photon(pos_2d, field_axisym, dL_z_sym, omega)) < 1e-12
 
-    # Case 2: Vortex field (l = 1) -> non-zero radiated orbital angular momentum
+    # Case 2: Vortex field (l = +1) -> positive lab-frame L_z and +1 OAM per photon
     field_vortex = np.zeros_like(pos_2d, dtype=np.complex128)
-    field_vortex[:, :, 0] = (x + 1j * y) * np.exp(-r2 / 10.0)
+    field_vortex[:, :, 0] = (x + 1j * y) * np.exp(-r2 / w2)
     dL_z_vortex = compute_angular_momentum_derivative(pos_2d, field_vortex, omega)
-    assert np.abs(np.sum(np.real(dL_z_vortex))) > 1.0
+    assert integrate_detector_oam_spectral_density(pos_2d, dL_z_vortex) > 0.0
+    assert compute_oam_per_photon(
+        pos_2d, field_vortex, dL_z_vortex, omega, propagation_sign=1
+    ) == pytest.approx(1.0, rel=1e-2)
+    assert compute_oam_per_photon(
+        pos_2d, field_vortex, dL_z_vortex, omega, propagation_sign=-1
+    ) == pytest.approx(-1.0, rel=1e-2)
+
+    # Case 3: Vortex field (l = -2) with spherical wavefront phase -> -2 OAM per photon
+    r_det = np.linalg.norm(pos_2d, axis=-1)
+    field_l_minus_2 = np.zeros_like(pos_2d, dtype=np.complex128)
+    field_l_minus_2[:, :, 0] = (
+        (x - 1j * y) ** 2
+        * np.exp(-r2 / w2)
+        * np.exp(1j * (omega / SPEED_OF_LIGHT) * r_det)
+    )
+    dL_z_minus_2 = compute_angular_momentum_derivative(pos_2d, field_l_minus_2, omega)
+    assert compute_oam_per_photon(
+        pos_2d, field_l_minus_2, dL_z_minus_2, omega, propagation_sign=1
+    ) == pytest.approx(-2.0, rel=2e-2)
 
 
 def test_plot_detector_radiation_and_oam() -> None:

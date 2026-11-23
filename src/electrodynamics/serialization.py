@@ -58,9 +58,7 @@ def prepare_output_directory(
     if run_tag:
         output_directory = runs_root / experiment_name / run_tag
     elif overwrite:
-        output_directory = (
-            runs_root / experiment_name / experiment_name / overwrite_run_tag
-        )
+        output_directory = runs_root / experiment_name / overwrite_run_tag
     else:
         timestamp = run_datetime.strftime("%Y-%m-%d_%H-%M-%S")
         tag = f"{timestamp_suffix}_{timestamp}" if timestamp_suffix else timestamp

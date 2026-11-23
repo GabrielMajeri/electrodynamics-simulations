@@ -14,6 +14,7 @@ from rich import print
 from electrodynamics.angular_momentum import (
     compute_angular_momentum_derivative,
     compute_particle_angular_momentum_z,
+    integrate_detector_oam_spectral_density,
 )
 from electrodynamics.beams import LaguerreGaussBeamParameters
 from electrodynamics.constants import (
@@ -509,7 +510,7 @@ def main(
         det_B_2d = det_params.reshape_to_grid(np.asarray(current_detector_B))
 
         dL_z = compute_angular_momentum_derivative(det_pos_2d, det_E_2d, rad_freq)
-        total_radiated_Lz = float(np.sum(np.real(dL_z)))
+        total_radiated_Lz = integrate_detector_oam_spectral_density(det_pos_2d, dL_z)
         print(
             f"Total electromagnetic radiated orbital angular momentum L_z^EM: {total_radiated_Lz:.6e} a.u."
         )

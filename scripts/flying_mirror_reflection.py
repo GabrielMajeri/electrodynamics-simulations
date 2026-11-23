@@ -14,7 +14,9 @@ from rich import print
 
 from electrodynamics.angular_momentum import (
     compute_angular_momentum_derivative,
+    compute_oam_per_photon,
     compute_particle_angular_momentum_z,
+    integrate_detector_oam_spectral_density,
 )
 from electrodynamics.beams import LaguerreGaussBeamParameters
 from electrodynamics.constants import (
@@ -635,6 +637,7 @@ def main(
         "sampling_method": sampling_method,
         "num_electrons": num_electrons,
         "detector_distance_lambda": detector_distance_lambda,
+        "actual_detector_distance_lambda": actual_detector_distance_lambda,
         "diffracted_beam_waist_lambda": diffracted_beam_waist / laser_wavelength,
         "detector_width_lambda": detector_width / laser_wavelength,
         "time_start": integration_start_time,
@@ -726,7 +729,23 @@ def main(
     dL_z = compute_angular_momentum_derivative(
         detector_local_coords_2d, det_E_local, reflected_frequency
     )
-    total_radiated_Lz = float(np.sum(np.real(dL_z)))
+    total_radiated_Lz = integrate_detector_oam_spectral_density(
+        detector_local_coords_2d, dL_z
+    )
+    oam_per_photon_lab = compute_oam_per_photon(
+        detector_local_coords_2d,
+        det_E_local,
+        dL_z,
+        reflected_frequency,
+        propagation_sign=1,
+    )
+    oam_per_photon_beam = compute_oam_per_photon(
+        detector_local_coords_2d,
+        det_E_local,
+        dL_z,
+        reflected_frequency,
+        propagation_sign=-1,
+    )
 
     coherent_intensity_2d = np.sum(np.abs(det_E_local) ** 2, axis=-1)
     incoherent_intensity_2d = detector_parameters.reshape_to_grid(
@@ -745,7 +764,10 @@ def main(
         f"mean incoherent intensity sum(|E_i|^2) = {mean_incoherent_intensity:.4e} "
         f"=> Coherence enhancement factor = {coherence_enhancement_factor:.1f}x"
     )
-    print(f"Total radiated OAM on detector L_z^EM = {total_radiated_Lz:.4e} a.u.")
+    print(
+        f"Total radiated OAM spectral density on detector dL_z^EM/domega = {total_radiated_Lz:.4e} a.u. "
+        f"(OAM per photon: lab L_z = {oam_per_photon_lab:+.4f}, beam-axis = {oam_per_photon_beam:+.4f})"
+    )
 
     reflected_wavenumber = (2 * pi) / reflected_wavelength
     if photon_energy_ev >= 100.0:
@@ -812,6 +834,8 @@ def main(
         "mean_incoherent_intensity": mean_incoherent_intensity,
         "coherence_enhancement_factor": coherence_enhancement_factor,
         "total_radiated_Lz_au": total_radiated_Lz,
+        "oam_per_photon_lab": oam_per_photon_lab,
+        "oam_per_photon_beam": oam_per_photon_beam,
         "num_electrons": num_electrons,
         "sampling_method": sampling_method,
     }

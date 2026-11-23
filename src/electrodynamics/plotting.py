@@ -9,7 +9,10 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle, FancyArrowPatch
 from mpl_toolkits.mplot3d import Axes3D, proj3d
 
-from electrodynamics.angular_momentum import compute_particle_angular_momentum_z
+from electrodynamics.angular_momentum import (
+    compute_particle_angular_momentum_z,
+    integrate_detector_oam_spectral_density,
+)
 from electrodynamics.constants import ELECTRON_REST_ENERGY_MEV, SPEED_OF_LIGHT
 from electrodynamics.detector import DetectorParameters
 
@@ -562,13 +565,13 @@ def plot_detector_radiation_and_oam(
     cbar1.set_ticklabels([r"$-\pi$", r"$-\pi/2$", r"$0$", r"$\pi/2$", r"$\pi$"])
 
     dL_z_real = np.real(dL_z)
-    total_Lz = float(np.sum(dL_z_real))
+    total_Lz = integrate_detector_oam_spectral_density(detector_positions, dL_z)
     vmax = max(float(np.max(np.abs(dL_z_real))), 1e-30)
     im2 = axes[2].imshow(
         dL_z_real.T, origin="lower", extent=extent, cmap="bwr", vmin=-vmax, vmax=vmax
     )
     axes[2].set_title(
-        f"Radiated OAM Density $\\mathrm{{Re}}(dL_z)$\n(Total $L_z^{{\\mathrm{{EM}}}} = {total_Lz:.3e}$)"
+        f"Radiated OAM Spectral Density $\\mathrm{{Re}}(d^2 L_z / d\\omega\\,dA)$\n($dL_z^{{\\mathrm{{EM}}}}/d\\omega = {total_Lz:.3e}$)"
     )
     axes[2].set_xlabel(r"$x / \lambda_0$")
     axes[2].set_ylabel(r"$y / \lambda_0$")

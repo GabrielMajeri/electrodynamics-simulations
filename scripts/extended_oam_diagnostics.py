@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import typer
 
+from electrodynamics.angular_momentum import integrate_detector_oam_spectral_density
 from electrodynamics.fields import compute_relativistic_reflection_parameters
 from electrodynamics.plotting import save_figure
 from electrodynamics.serialization import save_json
@@ -330,7 +331,7 @@ def generate_extended_diagnostics(
 
     # Panel 2: Longitudinal OAM Density Re(dL_z') (projection along k_re)
     dL_z_real = np.real(det_dL_z)
-    total_Lz = float(np.sum(dL_z_real))
+    total_Lz = integrate_detector_oam_spectral_density(coords, det_dL_z)
     vmax_z = max(float(np.max(np.abs(dL_z_real))), 1e-30)
     im1 = axes[1].imshow(
         dL_z_real.T,

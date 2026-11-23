@@ -208,8 +208,18 @@ def test_snapshot_schedule_and_serialization(tmp_path: Path) -> None:
 
     dt = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
     out_dir = prepare_output_directory("study", dt, overwrite=True, runs_root=tmp_path)
-    assert out_dir == tmp_path / "study_latest"
+    assert out_dir == tmp_path / "study" / "latest"
     assert out_dir.is_dir()
+
+    custom_dir = prepare_output_directory(
+        "study", dt, run_tag="custom", runs_root=tmp_path
+    )
+    assert custom_dir == tmp_path / "study" / "custom"
+    assert custom_dir.is_dir()
+
+    ts_dir = prepare_output_directory("study", dt, overwrite=False, runs_root=tmp_path)
+    assert ts_dir == tmp_path / "study" / "2026-01-02_03-04-05"
+    assert ts_dir.is_dir()
 
     save_json(
         out_dir / "cfg.json", {"arr": np.array([1.0, 2.0]), "scalar": np.float64(3.5)}

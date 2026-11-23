@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -6,8 +6,6 @@ from electrodynamics.constants import SPEED_OF_LIGHT as c
 
 if TYPE_CHECKING:
     import jax
-
-ArrayT = TypeVar("ArrayT", np.ndarray, "jax.Array")
 
 
 def compute_particle_angular_momentum_z[ArrayT: (np.ndarray, "jax.Array")](
@@ -47,6 +45,20 @@ def compute_particle_angular_momentum_z[ArrayT: (np.ndarray, "jax.Array")](
 def compute_angular_momentum_derivative(
     detector_positions: np.ndarray, electric_field: np.ndarray, omega: float
 ) -> np.ndarray:
+    """Computes the laboratory-frame z-component of radiated orbital angular momentum
+    spectral density ``d^2 L_z / (d omega dA)`` in Gaussian atomic units, matching
+    ``fields.py``'s Fourier transform convention
+    ``E_tilde(x, omega) = (1 / 2*pi) * int E(x, t) * exp(+i * omega * t) dt``.
+
+    Formula:
+        ``d^2 L_z / (d omega dA) = (c / omega) * sum_i Re[(1 / i) * E_tilde_i^* * (x d/dy - y d/dx) E_tilde_i]``.
+
+    For a wave with positive-frequency Fourier phase ``exp(+i * l * phi)``
+    (corresponding to time-domain ``cos(omega * t - l * phi)``, lab-frame ``L_z = +l``),
+    ``Re(dL_z) = +(l / omega) * c * |E_tilde|^2 = +(l / omega) * d^2 U / (d omega dA)``.
+    Note that for a reflected beam propagating along ``-z_hat``, lab-frame ``L_z``
+    retains its sign while beam-axis helicity is ``L_{k_hat} = -L_z``.
+    """
     assert detector_positions.ndim == 3, (
         "Detector position should be a 2D array of 3D vectors"
     )
@@ -82,19 +94,82 @@ def compute_angular_momentum_derivative(
         np.gradient(smooth_field[:, :, :], dx, dy, axis=(0, 1)),
     )
 
-    # Compute the z-component of the angular momentum density
+    # Compute the z-component of the orbital angular momentum spectral density
     dL_z = np.zeros(detector_positions.shape[:2], dtype=np.complex128)
 
     for i in range(3):
         dL_z += (
-            smooth_field[:, :, i]
+            np.conjugate(smooth_field[:, :, i])
             / (1j * omega)
             * (
-                detector_positions[:, :, 0] * np.conjugate(electric_field_dy[:, :, i])
-                - detector_positions[:, :, 1] * np.conjugate(electric_field_dx[:, :, i])
+                detector_positions[:, :, 0] * electric_field_dy[:, :, i]
+                - detector_positions[:, :, 1] * electric_field_dx[:, :, i]
             )
         )
 
-    dL_z /= 4 * np.pi
+    dL_z *= c
 
     return dL_z
+
+
+def _integrate_detector_scalar_2d(
+    detector_positions: np.ndarray, values: np.ndarray
+) -> float:
+    """Integrates a 2D scalar array over a rectangular detector grid using the trapezoidal rule."""
+    if detector_positions.ndim != 3 or detector_positions.shape[-1] != 3:
+        raise ValueError(
+            f"detector_positions must have shape (Nx, Ny, 3), got {detector_positions.shape}"
+        )
+    if values.shape != detector_positions.shape[:2]:
+        raise ValueError(
+            f"values shape {values.shape} must match detector grid shape {detector_positions.shape[:2]}"
+        )
+
+    xs = detector_positions[:, 0, 0]
+    ys = detector_positions[0, :, 1]
+    area_sign = (1.0 if xs[-1] >= xs[0] else -1.0) * (1.0 if ys[-1] >= ys[0] else -1.0)
+    return float(
+        area_sign * np.trapezoid(np.trapezoid(values, xs, axis=0), ys, axis=0)
+    )
+
+
+def integrate_detector_oam_spectral_density(
+    detector_positions: np.ndarray, dL_z: np.ndarray
+) -> float:
+    """Integrates the radiated OAM spectral density ``d^2 L_z / (d omega dA)``
+    over a 2D rectangular detector grid to return ``dL_z / d omega``.
+    """
+    return _integrate_detector_scalar_2d(detector_positions, np.real(dL_z))
+
+
+def compute_oam_per_photon(
+    detector_positions: np.ndarray,
+    electric_field: np.ndarray,
+    dL_z: np.ndarray,
+    omega: float,
+    propagation_sign: int = 1,
+) -> float:
+    """Computes the dimensionless orbital angular momentum per photon
+    ``<l> = propagation_sign * omega * (dL_z / d omega) / (dU / d omega)``
+    from far-field detector fields.
+
+    Set ``propagation_sign = 1`` for lab-frame ``L_z``, or ``-1`` for beam-axis helicity
+    of a beam propagating along ``-z_hat``.
+    """
+    if propagation_sign not in (1, -1):
+        raise ValueError(
+            f"propagation_sign must be 1 or -1, got {propagation_sign}"
+        )
+    if electric_field.shape != (*detector_positions.shape[:2], 3):
+        raise ValueError(
+            f"electric_field shape {electric_field.shape} must match {(*detector_positions.shape[:2], 3)}"
+        )
+
+    total_dLz_domega = integrate_detector_oam_spectral_density(detector_positions, dL_z)
+    dU_domega_dA = c * np.sum(np.abs(electric_field) ** 2, axis=-1)
+    total_dU_domega = _integrate_detector_scalar_2d(detector_positions, dU_domega_dA)
+
+    if total_dU_domega <= 0.0:
+        return 0.0
+
+    return float(propagation_sign * omega * total_dLz_domega / total_dU_domega)
