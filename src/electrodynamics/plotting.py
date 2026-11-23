@@ -14,7 +14,12 @@ from electrodynamics.angular_momentum import (
     integrate_detector_oam_spectral_density,
 )
 from electrodynamics.constants import ELECTRON_REST_ENERGY_MEV, SPEED_OF_LIGHT
-from electrodynamics.detector import DetectorParameters
+from electrodynamics.detector import (
+    AnyDetectorParameters,
+    DiskDetectorParameters,
+    compute_detector_area_weights,
+    compute_disk_radial_quadrature,
+)
 
 if TYPE_CHECKING:
     from electrodynamics.integrate import SnapshotData
@@ -71,7 +76,7 @@ def plot_experimental_setup(
     fig: Figure,
     positions: np.ndarray,
     momenta: np.ndarray,
-    detector_parameters: DetectorParameters,
+    detector_parameters: AnyDetectorParameters,
     detector_positions: np.ndarray,
 ) -> None:
     assert len(positions) == len(momenta), (
@@ -128,6 +133,8 @@ def plot_experimental_setup(
     )
 
     detector_grid = detector_parameters.reshape_to_grid(detector_positions)
+    if isinstance(detector_parameters, DiskDetectorParameters):
+        detector_grid = np.concatenate([detector_grid, detector_grid[:, :1, :]], axis=1)
 
     ax.plot_surface(
         detector_grid[:, :, 0],
@@ -497,6 +504,145 @@ def plot_beam_angular_momentum_evolution(
     fig.tight_layout()
 
 
+def _infer_is_polar_grid(
+    detector_positions: np.ndarray,
+    detector_parameters: AnyDetectorParameters | None = None,
+) -> bool:
+    if detector_parameters is not None:
+        return isinstance(detector_parameters, DiskDetectorParameters)
+    x = detector_positions[:, :, 0]
+    y = detector_positions[:, :, 1]
+    r = np.hypot(x, y)
+    return bool(not np.allclose(x[:, :1], x) and np.allclose(r[:, :1], r))
+
+
+def _build_polar_pcolormesh_edges(
+    detector_positions: np.ndarray, disk_radius: float | None = None
+) -> tuple[np.ndarray, np.ndarray, float]:
+    radii_1d = np.hypot(detector_positions[:, 0, 0], detector_positions[:, 0, 1])
+    n_r = len(radii_1d)
+    n_phi = detector_positions.shape[1]
+
+    if disk_radius is not None:
+        r_max = float(disk_radius)
+    elif n_r > 1:
+        r_max = float(radii_1d[-1] + 0.5 * (radii_1d[-1] - radii_1d[-2]))
+    else:
+        r_max = float(2.0 * radii_1d[0])
+    r_max = max(r_max, float(radii_1d[-1]))
+
+    r_edges = np.empty(n_r + 1, dtype=np.float64)
+    r_edges[0] = 0.0
+    if n_r > 1:
+        r_edges[1:-1] = 0.5 * (radii_1d[:-1] + radii_1d[1:])
+    r_edges[-1] = r_max
+
+    angles_1d = np.arctan2(detector_positions[0, :, 1], detector_positions[0, :, 0])
+    dphi = (2.0 * np.pi) / n_phi
+    phi_edges = (
+        angles_1d[0] - 0.5 * dphi + dphi * np.arange(n_phi + 1, dtype=np.float64)
+    )
+
+    X_edge = r_edges[:, None] * np.cos(phi_edges[None, :])
+    Y_edge = r_edges[:, None] * np.sin(phi_edges[None, :])
+    return X_edge, Y_edge, r_max
+
+
+def _infer_polar_area_weights(
+    detector_positions: np.ndarray,
+    detector_parameters: AnyDetectorParameters | None = None,
+) -> np.ndarray:
+    if isinstance(detector_parameters, DiskDetectorParameters):
+        return compute_detector_area_weights(detector_parameters)
+    X_edge, Y_edge, _ = _build_polar_pcolormesh_edges(detector_positions)
+    r_edges = np.hypot(X_edge[:, 0], Y_edge[:, 0])
+    n_phi = detector_positions.shape[1]
+    dphi = (2.0 * np.pi) / n_phi
+    radial_annuli = 0.5 * (r_edges[1:] ** 2 - r_edges[:-1] ** 2)
+    return np.broadcast_to(
+        radial_annuli[:, None] * dphi, detector_positions.shape[:2]
+    ).copy()
+
+
+def _plot_polar_panel(
+    ax: Axes,
+    X_edge: np.ndarray,
+    Y_edge: np.ndarray,
+    values: np.ndarray,
+    r_max: float,
+    cmap: str,
+    vmin: float | None = None,
+    vmax: float | None = None,
+):
+    mesh = ax.pcolormesh(
+        X_edge, Y_edge, values, shading="flat", cmap=cmap, vmin=vmin, vmax=vmax
+    )
+    ax.add_patch(
+        Circle(
+            (0.0, 0.0), r_max, fill=False, edgecolor="black", linewidth=0.8, alpha=0.6
+        )
+    )
+    ax.set_xlim(-r_max, r_max)
+    ax.set_ylim(-r_max, r_max)
+    ax.set_aspect("equal")
+    return mesh
+
+
+def infer_detector_area_weights(
+    detector_positions: np.ndarray,
+    detector_parameters: AnyDetectorParameters | None = None,
+) -> np.ndarray | None:
+    """Infers area quadrature weights when `detector_parameters` or polar geometry is present."""
+    if detector_parameters is not None:
+        return compute_detector_area_weights(detector_parameters)
+    if _infer_is_polar_grid(detector_positions):
+        return _infer_polar_area_weights(detector_positions)
+    return None
+
+
+def plot_detector_scalar_panel(
+    ax: Axes,
+    detector_positions: np.ndarray,
+    values_2d: np.ndarray,
+    scale: float,
+    cmap: str = "inferno",
+    vmin: float | None = None,
+    vmax: float | None = None,
+    detector_parameters: AnyDetectorParameters | None = None,
+):
+    """Renders a 2D detector scalar map onto `ax`, automatically handling rectangular
+    (`imshow`) and circular disk (`pcolormesh`) geometries scaled by `scale`.
+    """
+    if _infer_is_polar_grid(detector_positions, detector_parameters):
+        disk_radius = (
+            detector_parameters.radius
+            if isinstance(detector_parameters, DiskDetectorParameters)
+            else None
+        )
+        X_edge, Y_edge, r_max = _build_polar_pcolormesh_edges(
+            detector_positions, disk_radius=disk_radius
+        )
+        return _plot_polar_panel(
+            ax,
+            X_edge / scale,
+            Y_edge / scale,
+            values_2d,
+            r_max / scale,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
+
+    xs = detector_positions[:, 0, 0] / scale
+    ys = detector_positions[0, :, 1] / scale
+    extent = (float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1]))
+    image = ax.imshow(
+        values_2d.T, origin="lower", extent=extent, cmap=cmap, vmin=vmin, vmax=vmax
+    )
+    ax.set_aspect("equal")
+    return image
+
+
 def plot_detector_radiation_and_oam(
     fig: Figure,
     detector_positions: np.ndarray,
@@ -505,31 +651,21 @@ def plot_detector_radiation_and_oam(
     laser_wavelength: float,
     title: str = "Scattered radiation and radiated OAM on detector",
     wave_number: float | None = None,
+    area_weights: np.ndarray | None = None,
+    detector_parameters: AnyDetectorParameters | None = None,
 ) -> None:
     """Plots 2D detector patterns:
     1. Radiation intensity |E|^2
     2. Optical vortex phase arg(E_x) (optionally compensated for spherical wavefront curvature)
-    3. Radiated orbital angular momentum density Re(dL_z)
+    3. Radiated orbital angular momentum spectral density Re(d^2 L_z / (d omega dA))
 
-    detector_positions: shape (Nx, Ny, 3)
-    electric_field: shape (Nx, Ny, 3)
-    dL_z: shape (Nx, Ny)
+    Supports both rectangular `(Nx, Ny, ...)` and polar disk `(Nr, Nphi, ...)` grids.
     """
     fig.set_size_inches(15, 4.5)
     axes = fig.subplots(1, 3)
     fig.suptitle(title, fontsize=12)
 
-    xs = detector_positions[:, 0, 0] / laser_wavelength
-    ys = detector_positions[0, :, 1] / laser_wavelength
-    extent = [float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1])]
-
-    intensity = np.sum(np.abs(electric_field) ** 2, axis=-1)
-    im0 = axes[0].imshow(intensity.T, origin="lower", extent=extent, cmap="inferno")
-    axes[0].set_title(r"Radiation Intensity $|E_{\mathrm{det}}|^2$")
-    axes[0].set_xlabel(r"$x / \lambda_0$")
-    axes[0].set_ylabel(r"$y / \lambda_0$")
-    axes[0].set_aspect("equal")
-    fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+    is_polar = _infer_is_polar_grid(detector_positions, detector_parameters)
 
     if (
         np.max(np.abs(electric_field[:, :, 0]))
@@ -541,41 +677,80 @@ def plot_detector_radiation_and_oam(
 
     if wave_number is not None:
         r_detector = np.linalg.norm(detector_positions, axis=-1)
-        r_center = abs(
-            float(
-                detector_positions[
-                    detector_positions.shape[0] // 2,
-                    detector_positions.shape[1] // 2,
-                    2,
-                ]
+        if is_polar:
+            r_center = abs(float(detector_positions[0, 0, 2]))
+        else:
+            r_center = abs(
+                float(
+                    detector_positions[
+                        detector_positions.shape[0] // 2,
+                        detector_positions.shape[1] // 2,
+                        2,
+                    ]
+                )
             )
-        )
         E_comp = E_comp * np.exp(-1j * wave_number * (r_detector - r_center))
 
+    intensity = np.sum(np.abs(electric_field) ** 2, axis=-1)
     phase = np.angle(E_comp)
-    im1 = axes[1].imshow(
-        phase.T, origin="lower", extent=extent, cmap="twilight", vmin=-np.pi, vmax=np.pi
+    dL_z_real = np.real(dL_z)
+    vmax = max(float(np.max(np.abs(dL_z_real))), 1e-30)
+
+    eff_weights = (
+        area_weights
+        if area_weights is not None
+        else infer_detector_area_weights(detector_positions, detector_parameters)
     )
+    total_Lz = integrate_detector_oam_spectral_density(
+        detector_positions, dL_z, area_weights=eff_weights
+    )
+
+    im0 = plot_detector_scalar_panel(
+        axes[0],
+        detector_positions,
+        intensity,
+        laser_wavelength,
+        cmap="inferno",
+        detector_parameters=detector_parameters,
+    )
+    im1 = plot_detector_scalar_panel(
+        axes[1],
+        detector_positions,
+        phase,
+        laser_wavelength,
+        cmap="twilight",
+        vmin=-np.pi,
+        vmax=np.pi,
+        detector_parameters=detector_parameters,
+    )
+    im2 = plot_detector_scalar_panel(
+        axes[2],
+        detector_positions,
+        dL_z_real,
+        laser_wavelength,
+        cmap="bwr",
+        vmin=-vmax,
+        vmax=vmax,
+        detector_parameters=detector_parameters,
+    )
+
+    axes[0].set_title(r"Radiation Intensity $|E_{\mathrm{det}}|^2$")
+    axes[0].set_xlabel(r"$x / \lambda_0$")
+    axes[0].set_ylabel(r"$y / \lambda_0$")
+    fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
     axes[1].set_title(r"Vortex Phase $\arg(E_{\perp})$")
     axes[1].set_xlabel(r"$x / \lambda_0$")
     axes[1].set_ylabel(r"$y / \lambda_0$")
-    axes[1].set_aspect("equal")
     cbar1 = fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
     cbar1.set_ticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
     cbar1.set_ticklabels([r"$-\pi$", r"$-\pi/2$", r"$0$", r"$\pi/2$", r"$\pi$"])
 
-    dL_z_real = np.real(dL_z)
-    total_Lz = integrate_detector_oam_spectral_density(detector_positions, dL_z)
-    vmax = max(float(np.max(np.abs(dL_z_real))), 1e-30)
-    im2 = axes[2].imshow(
-        dL_z_real.T, origin="lower", extent=extent, cmap="bwr", vmin=-vmax, vmax=vmax
-    )
     axes[2].set_title(
         f"Radiated OAM Spectral Density $\\mathrm{{Re}}(d^2 L_z / d\\omega\\,dA)$\n($dL_z^{{\\mathrm{{EM}}}}/d\\omega = {total_Lz:.3e}$)"
     )
     axes[2].set_xlabel(r"$x / \lambda_0$")
     axes[2].set_ylabel(r"$y / \lambda_0$")
-    axes[2].set_aspect("equal")
     fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
     fig.tight_layout()
@@ -589,22 +764,47 @@ def plot_detector_field_map(
     suptitle: str = "Scattered electric field on detector",
     cmap: str = "bwr",
     symmetric_limits: bool = True,
+    local_coords_2d: np.ndarray | None = None,
+    scale: float = 1.0,
+    disk_radius: float | None = None,
 ) -> None:
-    """Plots a 2D scalar slice `(Nx, Ny)` on the detector screen
-    (transposed for `origin='lower'`).
-    """
+    "Plots a 2D scalar slice `(Nx, Ny)` or `(Nr, Nphi)` on the detector screen."
     ax = fig.add_subplot()
     fig.suptitle(suptitle)
     ax.set_title(title)
 
-    data = values_2d.T
-    if symmetric_limits:
-        vmax = max(float(np.max(np.abs(data))), 1e-15)
-        image = ax.imshow(
-            data, cmap=cmap, origin="lower", extent=extent, vmin=-vmax, vmax=vmax
+    if local_coords_2d is not None and _infer_is_polar_grid(local_coords_2d):
+        X_edge, Y_edge, r_max = _build_polar_pcolormesh_edges(
+            local_coords_2d, disk_radius=disk_radius
         )
+        X_edge_scaled = X_edge / scale
+        Y_edge_scaled = Y_edge / scale
+        r_max_scaled = r_max / scale
+        if symmetric_limits:
+            vmax = max(float(np.max(np.abs(values_2d))), 1e-15)
+            image = _plot_polar_panel(
+                ax,
+                X_edge_scaled,
+                Y_edge_scaled,
+                values_2d,
+                r_max_scaled,
+                cmap=cmap,
+                vmin=-vmax,
+                vmax=vmax,
+            )
+        else:
+            image = _plot_polar_panel(
+                ax, X_edge_scaled, Y_edge_scaled, values_2d, r_max_scaled, cmap=cmap
+            )
     else:
-        image = ax.imshow(data, cmap=cmap, origin="lower", extent=extent)
+        data = values_2d.T
+        if symmetric_limits:
+            vmax = max(float(np.max(np.abs(data))), 1e-15)
+            image = ax.imshow(
+                data, cmap=cmap, origin="lower", extent=extent, vmin=-vmax, vmax=vmax
+            )
+        else:
+            image = ax.imshow(data, cmap=cmap, origin="lower", extent=extent)
 
     ax.set_xlabel("Detector $x/w_0$")
     ax.set_ylabel("Detector $y/w_0$")
@@ -616,17 +816,43 @@ def plot_detector_field_map(
 def save_detector_field_component_plots(
     output_directory: Path,
     electric_field_2d: np.ndarray,
-    detector_parameters: DetectorParameters,
+    detector_parameters: AnyDetectorParameters,
     waist_radius: float,
     formats: Sequence[str] = ("pdf", "png"),
+    local_coords_2d: np.ndarray | None = None,
 ) -> None:
     "Saves individual `E_x`, `E_y`, `E_z`, and `|E|` detector field maps."
-    detector_extent: tuple[float, float, float, float] = (
-        (-detector_parameters.width / 2) / waist_radius,
-        (+detector_parameters.width / 2) / waist_radius,
-        (-detector_parameters.height / 2) / waist_radius,
-        (+detector_parameters.height / 2) / waist_radius,
-    )
+    if isinstance(detector_parameters, DiskDetectorParameters):
+        r_norm = detector_parameters.radius / waist_radius
+        detector_extent: tuple[float, float, float, float] = (
+            -r_norm,
+            +r_norm,
+            -r_norm,
+            +r_norm,
+        )
+        if local_coords_2d is None:
+            radii_1d, _, angles_1d = compute_disk_radial_quadrature(detector_parameters)
+            r_grid, phi_grid = np.meshgrid(radii_1d, angles_1d, indexing="ij")
+            coords_for_plot = np.stack(
+                (
+                    r_grid * np.cos(phi_grid),
+                    r_grid * np.sin(phi_grid),
+                    np.zeros_like(r_grid),
+                ),
+                axis=-1,
+            )
+        else:
+            coords_for_plot = local_coords_2d
+        disk_radius: float | None = detector_parameters.radius
+    else:
+        detector_extent = (
+            (-detector_parameters.width / 2) / waist_radius,
+            (+detector_parameters.width / 2) / waist_radius,
+            (-detector_parameters.height / 2) / waist_radius,
+            (+detector_parameters.height / 2) / waist_radius,
+        )
+        coords_for_plot = None
+        disk_radius = None
 
     for index, coordinate in enumerate(("x", "y", "z")):
         fig = plt.figure(figsize=(7, 6), dpi=200)
@@ -637,6 +863,9 @@ def save_detector_field_component_plots(
             title=f"$E_{coordinate}$",
             cmap="bwr",
             symmetric_limits=True,
+            local_coords_2d=coords_for_plot,
+            scale=waist_radius,
+            disk_radius=disk_radius,
         )
         save_figure(fig, output_directory / f"electric_field_{coordinate}", formats)
 
@@ -648,6 +877,9 @@ def save_detector_field_component_plots(
         title="$|E|$",
         cmap="inferno",
         symmetric_limits=False,
+        local_coords_2d=coords_for_plot,
+        scale=waist_radius,
+        disk_radius=disk_radius,
     )
     save_figure(fig, output_directory / "electric_field_norm", formats)
 

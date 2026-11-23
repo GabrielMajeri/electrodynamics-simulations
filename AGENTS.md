@@ -4,12 +4,15 @@ Operational guide for AI coding agents working in `electrodynamics-simulations` 
 
 ## Commands
 
-- **Install / sync environment** (pick one backend extra: `cpu`, `cu130`, `rocm`):
-  `uv sync --extra cpu`
+- **Install / sync environment** (pick one backend extra: `cpu`, `cu130`, `rocm`; use a login shell `bash -lc` when `uv` or `module` is not on `PATH`):
+  `uv sync --extra cpu` (or `uv sync --extra cu130` for CUDA GPU nodes)
 - **Run test suite**:
   `.venv/bin/pytest -v` (or `uv run pytest -v` when `uv` is on `PATH`)
 - **Run a simulation or diagnostic script**:
   `.venv/bin/python scripts/<script>.py --help`
+- **Run on the Slurm GPU node** (requires CUDA extras and loading the CUDA module):
+  `bash -lc "module load cuda/13.4.3 && srun --account=acc-c-fiz-26-004 --partition=gpu --gpus=2 .venv/bin/python scripts/<script>.py ..."`
+  Running JAX on the login node without loading CUDA falls back to CPU (logging a `cuPTI` load warning).
 - **Type checking**: `basedpyright` in `basic` mode (see `.vscode/settings.json`).
 
 ## Architecture & Boundaries

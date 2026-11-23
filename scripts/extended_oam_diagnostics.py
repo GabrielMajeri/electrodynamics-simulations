@@ -15,7 +15,11 @@ import typer
 
 from electrodynamics.angular_momentum import integrate_detector_oam_spectral_density
 from electrodynamics.fields import compute_relativistic_reflection_parameters
-from electrodynamics.plotting import save_figure
+from electrodynamics.plotting import (
+    infer_detector_area_weights,
+    plot_detector_scalar_panel,
+    save_figure,
+)
 from electrodynamics.serialization import save_json
 
 
@@ -314,29 +318,37 @@ def generate_extended_diagnostics(
         fontweight="bold",
     )
 
-    xs = coords[:, 0, 0] / (float(cfg["laser_parameters"]["wavelength"]))
-    ys = coords[0, :, 1] / (float(cfg["laser_parameters"]["wavelength"]))
-    extent = [float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1])]
+    laser_wavelength = float(cfg["laser_parameters"]["wavelength"])
+    weights_path = run_dir / "detector_area_weights.npy"
+    area_weights = (
+        np.load(weights_path)
+        if weights_path.exists()
+        else infer_detector_area_weights(coords)
+    )
 
     # Panel 1: Intensity with elliptic pulse-front shear contour
     intensity = np.sum(np.abs(det_E) ** 2, axis=-1)
-    im0 = axes[0].imshow(intensity.T, origin="lower", extent=extent, cmap="inferno")
+    im0 = plot_detector_scalar_panel(
+        axes[0], coords, intensity, laser_wavelength, cmap="inferno"
+    )
     axes[0].set_title(
         r"Detector Intensity $|E_{\mathrm{det}}|^2$" "\n(Elliptical Squeeze along $x'$)"
     )
     axes[0].set_xlabel(r"Transverse $x' / \lambda_0$ (in incidence plane)")
     axes[0].set_ylabel(r"Transverse $y' / \lambda_0$ (out of plane)")
-    axes[0].set_aspect("equal")
     fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
     # Panel 2: Longitudinal OAM Density Re(dL_z') (projection along k_re)
     dL_z_real = np.real(det_dL_z)
-    total_Lz = integrate_detector_oam_spectral_density(coords, det_dL_z)
+    total_Lz = integrate_detector_oam_spectral_density(
+        coords, det_dL_z, area_weights=area_weights
+    )
     vmax_z = max(float(np.max(np.abs(dL_z_real))), 1e-30)
-    im1 = axes[1].imshow(
-        dL_z_real.T,
-        origin="lower",
-        extent=extent,
+    im1 = plot_detector_scalar_panel(
+        axes[1],
+        coords,
+        dL_z_real,
+        laser_wavelength,
         cmap="bwr",
         vmin=-vmax_z,
         vmax=vmax_z,
@@ -347,7 +359,6 @@ def generate_extended_diagnostics(
     )
     axes[1].set_xlabel(r"$x' / \lambda_0$")
     axes[1].set_ylabel(r"$y' / \lambda_0$")
-    axes[1].set_aspect("equal")
     fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
     # Panel 3: Transverse OAM component L_x' induced by the tilt
@@ -359,10 +370,11 @@ def generate_extended_diagnostics(
         * (coords[:, :, 1] / (np.max(np.abs(coords[:, :, 1])) + 1e-30))
     )
     vmax_x = max(float(np.max(np.abs(dL_xp_synthetic))), 1e-30)
-    im2 = axes[2].imshow(
-        dL_xp_synthetic.T,
-        origin="lower",
-        extent=extent,
+    im2 = plot_detector_scalar_panel(
+        axes[2],
+        coords,
+        dL_xp_synthetic,
+        laser_wavelength,
         cmap="coolwarm",
         vmin=-vmax_x,
         vmax=vmax_x,
@@ -373,7 +385,6 @@ def generate_extended_diagnostics(
     )
     axes[2].set_xlabel(r"$x' / \lambda_0$")
     axes[2].set_ylabel(r"$y' / \lambda_0$")
-    axes[2].set_aspect("equal")
     fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
     fig.tight_layout()

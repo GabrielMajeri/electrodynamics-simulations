@@ -13,7 +13,7 @@ from jax.sharding import PartitionSpec as P
 from rich import print
 
 from electrodynamics.angular_momentum import (
-    compute_angular_momentum_derivative,
+    compute_detector_oam_spectral_density,
     compute_oam_per_photon,
     compute_particle_angular_momentum_z,
     integrate_detector_oam_spectral_density,
@@ -27,8 +27,8 @@ from electrodynamics.constants import (
     SPEED_OF_LIGHT,
 )
 from electrodynamics.detector import (
-    DetectorParameters,
-    initialize_detector_positions_reflected,
+    build_detector_grid,
+    create_detector_parameters,
     project_fields_to_detector_frame,
 )
 from electrodynamics.fields import (
@@ -434,9 +434,25 @@ def main(
             help="Detector width and height as a multiple of the diffracted beam waist w_1(R_det) at the detector"
         ),
     ] = 5.0,
+    detector_shape: Annotated[
+        Literal["rect", "disk"],
+        typer.Option(help="Detector geometry: 'rect' (Cartesian) or 'disk' (polar)"),
+    ] = "rect",
     detector_grid_size: Annotated[
-        int, typer.Option(help="Detector resolution (grid_size x grid_size pixels)")
+        int, typer.Option(help="Detector resolution (grid_size x grid_size pixels for 'rect')")
     ] = 64,
+    detector_num_radial: Annotated[
+        int, typer.Option(help="Number of radial rings for 'disk' detector")
+    ] = 48,
+    detector_num_azimuthal: Annotated[
+        int, typer.Option(help="Number of azimuthal samples for 'disk' detector")
+    ] = 64,
+    detector_radial_sampling: Annotated[
+        Literal["gauss-legendre", "uniform", "equal-area"],
+        typer.Option(
+            help="Radial quadrature scheme for 'disk' detector: 'gauss-legendre', 'uniform', or 'equal-area'"
+        ),
+    ] = "gauss-legendre",
     frequency_window_percentage: Annotated[
         float,
         typer.Option(
@@ -578,20 +594,23 @@ def main(
         f"({detector_distance / reflected_rayleigh_range:.1f} x z_{{R,1}}), diffracted waist w_1 = {diffracted_beam_waist / laser_wavelength:.1f} lambda_0"
     )
 
-    detector_parameters = DetectorParameters(
-        width=detector_width,
-        height=detector_width,
-        grid_size_x=detector_grid_size,
-        grid_size_y=detector_grid_size,
+    detector_parameters = create_detector_parameters(
+        detector_shape,
+        span=detector_width,
+        grid_size=detector_grid_size,
+        num_radial=detector_num_radial,
+        num_azimuthal=detector_num_azimuthal,
+        radial_sampling=detector_radial_sampling,
     )
-
-    detector_positions_flat, detector_local_coords_2d = (
-        initialize_detector_positions_reflected(
-            detector_parameters,
-            distance=detector_distance,
-            reflection_angle=theta_re,
-        )
+    detector_grid = build_detector_grid(
+        detector_parameters,
+        distance=detector_distance,
+        reflection_angle=theta_re,
+        direction=-1,
     )
+    detector_positions_flat = detector_grid.lab_positions_flat
+    detector_local_coords_2d = detector_grid.local_coords_2d
+    detector_area_weights = detector_grid.area_weights_2d
     detector_positions_jnp = jnp.asarray(detector_positions_flat)
 
     ring_peak_offset = (
@@ -640,6 +659,8 @@ def main(
         "actual_detector_distance_lambda": actual_detector_distance_lambda,
         "diffracted_beam_waist_lambda": diffracted_beam_waist / laser_wavelength,
         "detector_width_lambda": detector_width / laser_wavelength,
+        "detector_shape": detector_shape,
+        "detector_parameters": detector_parameters,
         "time_start": integration_start_time,
         "time_end": integration_end_time,
         "time_delta": time_step,
@@ -726,11 +747,11 @@ def main(
         det_E_lab_2d, det_B_lab_2d, reflection_angle=theta_re
     )
 
-    dL_z = compute_angular_momentum_derivative(
-        detector_local_coords_2d, det_E_local, reflected_frequency
+    dL_z = compute_detector_oam_spectral_density(
+        detector_grid, det_E_local, reflected_frequency
     )
     total_radiated_Lz = integrate_detector_oam_spectral_density(
-        detector_local_coords_2d, dL_z
+        detector_local_coords_2d, dL_z, area_weights=detector_area_weights
     )
     oam_per_photon_lab = compute_oam_per_photon(
         detector_local_coords_2d,
@@ -738,6 +759,7 @@ def main(
         dL_z,
         reflected_frequency,
         propagation_sign=1,
+        area_weights=detector_area_weights,
     )
     oam_per_photon_beam = compute_oam_per_photon(
         detector_local_coords_2d,
@@ -745,6 +767,7 @@ def main(
         dL_z,
         reflected_frequency,
         propagation_sign=-1,
+        area_weights=detector_area_weights,
     )
 
     coherent_intensity_2d = np.sum(np.abs(det_E_local) ** 2, axis=-1)
@@ -752,7 +775,12 @@ def main(
         np.asarray(result.detector_incoherent_intensity)
     )
     peak_coherent_intensity = float(np.max(coherent_intensity_2d))
-    mean_incoherent_intensity = float(np.mean(incoherent_intensity_2d))
+    total_detector_area = float(np.sum(detector_area_weights))
+    mean_incoherent_intensity = (
+        float(np.sum(incoherent_intensity_2d * detector_area_weights) / total_detector_area)
+        if total_detector_area > 0.0
+        else float(np.mean(incoherent_intensity_2d))
+    )
     coherence_enhancement_factor = (
         peak_coherent_intensity / mean_incoherent_intensity
         if mean_incoherent_intensity > 0
@@ -786,6 +814,8 @@ def main(
             f"{energy_label}$)"
         ),
         wave_number=reflected_wavenumber,
+        area_weights=detector_area_weights,
+        detector_parameters=detector_parameters,
     )
     save_figure(
         fig, output_directory / "detector_radiation_and_oam", formats=("pdf", "png")
@@ -797,9 +827,11 @@ def main(
         detector_parameters,
         waist_radius,
         formats=("pdf", "png"),
+        local_coords_2d=detector_local_coords_2d,
     )
 
     np.save(output_directory / "detector_local_coords.npy", detector_local_coords_2d)
+    np.save(output_directory / "detector_area_weights.npy", detector_area_weights)
     np.save(output_directory / "detector_electric_field.npy", det_E_local)
     np.save(output_directory / "detector_magnetic_field.npy", det_B_local)
     np.save(output_directory / "detector_dL_z.npy", dL_z)
@@ -836,6 +868,7 @@ def main(
         "total_radiated_Lz_au": total_radiated_Lz,
         "oam_per_photon_lab": oam_per_photon_lab,
         "oam_per_photon_beam": oam_per_photon_beam,
+        "detector_shape": detector_shape,
         "num_electrons": num_electrons,
         "sampling_method": sampling_method,
     }

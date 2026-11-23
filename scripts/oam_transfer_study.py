@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from math import pi
 from time import perf_counter
-from typing import Annotated
+from typing import Annotated, Literal
 
 import jax
 import jax.numpy as jnp
@@ -27,8 +27,9 @@ from electrodynamics.constants import (
     SPEED_OF_LIGHT as c,
 )
 from electrodynamics.detector import (
-    DetectorParameters,
-    initialize_detector_positions_negative_z,
+    AnyDetectorParameters,
+    build_detector_grid,
+    create_detector_parameters,
 )
 from electrodynamics.fields import (
     compute_doppler_shift_factor,
@@ -80,7 +81,7 @@ def integrate_particles(
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
     spectrum_measurement_position: jdc.Static[jax.Array],
-    detector_parameters: jdc.Static[DetectorParameters],
+    detector_parameters: jdc.Static[AnyDetectorParameters],
     detector_positions: jdc.Static[jax.Array],
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """Compute the trajectory and the scattered radiation from particles
@@ -251,7 +252,7 @@ def simulate_trajectories(
     frequency_width: jdc.Static[float],
     num_frequencies: jdc.Static[int],
     spectrum_measurement_position: jax.Array,
-    detector_parameters: jdc.Static[DetectorParameters],
+    detector_parameters: jdc.Static[AnyDetectorParameters],
     detector_positions: jdc.Static[jax.Array],
     batch_size: jdc.Static[int],
 ) -> IntegrationResult:
@@ -371,6 +372,25 @@ def main(
             help="Percentage of the central Doppler-shifted frequency around which to measure the spectrum."
         ),
     ] = 0.2,
+    detector_shape: Annotated[
+        Literal["rect", "disk"],
+        typer.Option(help="Detector geometry: 'rect' (Cartesian) or 'disk' (polar)"),
+    ] = "rect",
+    detector_grid_size: Annotated[
+        int, typer.Option(help="Detector resolution per axis for 'rect' detector")
+    ] = 64,
+    detector_num_radial: Annotated[
+        int, typer.Option(help="Number of radial rings for 'disk' detector")
+    ] = 48,
+    detector_num_azimuthal: Annotated[
+        int, typer.Option(help="Number of azimuthal samples for 'disk' detector")
+    ] = 64,
+    detector_radial_sampling: Annotated[
+        Literal["gauss-legendre", "uniform", "equal-area"],
+        typer.Option(
+            help="Radial quadrature scheme for 'disk' detector: 'gauss-legendre', 'uniform', or 'equal-area'"
+        ),
+    ] = "gauss-legendre",
     overwrite: Annotated[
         bool,
         typer.Option(
@@ -473,17 +493,19 @@ def main(
     frequency_width = frequency_window_percentage * central_frequency
     num_frequencies = 256
 
-    detector_parameters = DetectorParameters(
-        width=10 * 75 * laser_wavelength,
-        height=10 * 75 * laser_wavelength,
-        grid_size_x=64,
-        grid_size_y=64,
-    )
     z_distance = -25_000 * laser_wavelength
-
-    detector_positions = jnp.asarray(
-        initialize_detector_positions_negative_z(detector_parameters, z_distance)
+    detector_parameters = create_detector_parameters(
+        detector_shape,
+        span=10 * 75 * laser_wavelength,
+        grid_size=detector_grid_size,
+        num_radial=detector_num_radial,
+        num_azimuthal=detector_num_azimuthal,
+        radial_sampling=detector_radial_sampling,
     )
+    detector_grid = build_detector_grid(
+        detector_parameters, distance=abs(z_distance), direction=-1
+    )
+    detector_positions = jnp.asarray(detector_grid.lab_positions_flat)
 
     spectrum_measurement_position = jnp.array(
         (
@@ -508,6 +530,8 @@ def main(
         "time_end": integration_end_time,
         "time_end_in_multiples_of_tau_0": f"{integration_end_time / tau_0} * tau_0",
         "time_delta": time_step,
+        "detector_shape": detector_shape,
+        "detector_parameters": detector_parameters,
         "spectrum_measurement_position": spectrum_measurement_position,
         "spectrum_measurement_position_in_multiples_of_lambda": spectrum_measurement_position
         / laser_wavelength,
@@ -589,6 +613,7 @@ def main(
         detector_parameters,
         waist_radius,
         formats=("pdf",),
+        local_coords_2d=detector_grid.local_coords_2d,
     )
 
 

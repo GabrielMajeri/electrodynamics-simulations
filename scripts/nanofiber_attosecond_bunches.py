@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from math import pi
 from time import perf_counter
-from typing import Annotated
+from typing import Annotated, Literal
 
 import jax
 import jax.numpy as jnp
@@ -12,7 +12,7 @@ import typer
 from rich import print
 
 from electrodynamics.angular_momentum import (
-    compute_angular_momentum_derivative,
+    compute_detector_oam_spectral_density,
     compute_particle_angular_momentum_z,
     integrate_detector_oam_spectral_density,
 )
@@ -30,8 +30,8 @@ from electrodynamics.constants import (
     SPEED_OF_LIGHT as c,
 )
 from electrodynamics.detector import (
-    DetectorParameters,
-    initialize_detector_positions_negative_z,
+    build_detector_grid,
+    create_detector_parameters,
 )
 from electrodynamics.fields import compute_coherent_detector_and_spectrum_fields
 from electrodynamics.initial_conditions import (
@@ -223,9 +223,25 @@ def main(
             help="Detector transverse width and height in laser waist radii w_0"
         ),
     ] = 15.0,
+    detector_shape: Annotated[
+        Literal["rect", "disk"],
+        typer.Option(help="Detector geometry: 'rect' (Cartesian) or 'disk' (polar)"),
+    ] = "rect",
     detector_grid_size: Annotated[
-        int, typer.Option(help="Detector pixel grid resolution (grid_size x grid_size)")
+        int, typer.Option(help="Detector pixel grid resolution (grid_size x grid_size for 'rect')")
     ] = 32,
+    detector_num_radial: Annotated[
+        int, typer.Option(help="Number of radial rings for 'disk' detector")
+    ] = 32,
+    detector_num_azimuthal: Annotated[
+        int, typer.Option(help="Number of azimuthal samples for 'disk' detector")
+    ] = 48,
+    detector_radial_sampling: Annotated[
+        Literal["gauss-legendre", "uniform", "equal-area"],
+        typer.Option(
+            help="Radial quadrature scheme for 'disk' detector: 'gauss-legendre', 'uniform', or 'equal-area'"
+        ),
+    ] = "gauss-legendre",
     radiation_harmonic: Annotated[
         int,
         typer.Option(
@@ -359,15 +375,20 @@ def main(
     )
 
     detector_z = detector_distance_lambda * laser_wavelength
-    det_params = DetectorParameters(
-        width=detector_width_waists * waist_radius,
-        height=detector_width_waists * waist_radius,
-        grid_size_x=detector_grid_size,
-        grid_size_y=detector_grid_size,
+    det_params = create_detector_parameters(
+        detector_shape,
+        span=detector_width_waists * waist_radius,
+        grid_size=detector_grid_size,
+        num_radial=detector_num_radial,
+        num_azimuthal=detector_num_azimuthal,
+        radial_sampling=detector_radial_sampling,
     )
-    det_positions_flat = initialize_detector_positions_negative_z(
-        det_params, z_distance=detector_z
+    detector_grid = build_detector_grid(
+        det_params,
+        distance=abs(detector_z),
+        direction=1 if detector_z >= 0.0 else -1,
     )
+    det_positions_flat = detector_grid.lab_positions_flat
     det_positions_jnp = jnp.asarray(det_positions_flat)
 
     rad_freq = (
@@ -384,7 +405,7 @@ def main(
     frequencies_np = np.linspace(freq_min, freq_max, spectrum_num_frequencies)
     frequencies_jnp = jnp.asarray(frequencies_np)
 
-    num_det_pixels = detector_grid_size * detector_grid_size
+    num_det_pixels = len(det_positions_flat)
     current_detector_E = jnp.zeros((num_det_pixels, 3), dtype=jnp.complex128)
     current_detector_B = jnp.zeros((num_det_pixels, 3), dtype=jnp.complex128)
     current_spectrum_E = jnp.zeros((spectrum_num_frequencies, 3), dtype=jnp.complex128)
@@ -407,6 +428,8 @@ def main(
         "detector_distance_lambda": detector_distance_lambda,
         "detector_width_waists": detector_width_waists,
         "detector_grid_size": detector_grid_size,
+        "detector_shape": detector_shape,
+        "detector_parameters": det_params,
         "radiation_harmonic": radiation_harmonic,
         "radiation_frequency": rad_freq,
     }
@@ -505,12 +528,14 @@ def main(
             "[bold blue]Analyzing scattered radiation and orbital angular momentum on detector...[/bold blue]"
         )
         current_detector_E.block_until_ready()
-        det_pos_2d = det_params.reshape_to_grid(np.asarray(det_positions_flat))
+        det_pos_2d = detector_grid.local_coords_2d
         det_E_2d = det_params.reshape_to_grid(np.asarray(current_detector_E))
         det_B_2d = det_params.reshape_to_grid(np.asarray(current_detector_B))
 
-        dL_z = compute_angular_momentum_derivative(det_pos_2d, det_E_2d, rad_freq)
-        total_radiated_Lz = integrate_detector_oam_spectral_density(det_pos_2d, dL_z)
+        dL_z = compute_detector_oam_spectral_density(detector_grid, det_E_2d, rad_freq)
+        total_radiated_Lz = integrate_detector_oam_spectral_density(
+            det_pos_2d, dL_z, area_weights=detector_grid.area_weights_2d
+        )
         print(
             f"Total electromagnetic radiated orbital angular momentum L_z^EM: {total_radiated_Lz:.6e} a.u."
         )
@@ -523,6 +548,8 @@ def main(
             dL_z,
             laser_wavelength,
             title=f"Detector radiation at $\\omega = {rad_freq / laser_frequency:.1f} \\omega_0$ ($l={azimuthal_index}, \\sigma={sigma} \\to j_z={j_z}$)",
+            area_weights=detector_grid.area_weights_2d,
+            detector_parameters=det_params,
         )
         save_figure(
             fig, output_directory / "detector_radiation_and_oam", formats=("png", "pdf")
@@ -538,6 +565,10 @@ def main(
         )
 
         np.save(output_directory / "detector_positions.npy", det_pos_2d)
+        np.save(
+            output_directory / "detector_area_weights.npy",
+            detector_grid.area_weights_2d,
+        )
         np.save(output_directory / "detector_electric_field.npy", det_E_2d)
         np.save(output_directory / "detector_magnetic_field.npy", det_B_2d)
         np.save(output_directory / "detector_dL_z.npy", dL_z)
@@ -552,6 +583,7 @@ def main(
             "detector_distance_lambda": detector_distance_lambda,
             "detector_width_waists": detector_width_waists,
             "detector_grid_size": detector_grid_size,
+            "detector_shape": detector_shape,
             "j_z": j_z,
             "azimuthal_index": azimuthal_index,
             "polarization_sigma": sigma,

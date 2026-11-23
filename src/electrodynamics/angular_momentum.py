@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 
 from electrodynamics.constants import SPEED_OF_LIGHT as c
+from electrodynamics.detector import DetectorGrid
 
 if TYPE_CHECKING:
     import jax
@@ -112,18 +113,80 @@ def compute_angular_momentum_derivative(
     return dL_z
 
 
-def _integrate_detector_scalar_2d(
-    detector_positions: np.ndarray, values: np.ndarray
-) -> float:
-    """Integrates a 2D scalar array over a rectangular detector grid using the trapezoidal rule."""
+def compute_angular_momentum_derivative_polar(
+    detector_positions: np.ndarray, electric_field: np.ndarray, omega: float
+) -> np.ndarray:
+    """Computes the laboratory-frame z-component of radiated orbital angular momentum
+    spectral density ``d^2 L_z / (d omega dA)`` on a centered polar disk grid
+    ``(N_r, N_phi, 3)`` using spectral differentiation (1D FFT) along ``phi``.
+
+    Because ``|r_det| = sqrt(r^2 + z_d^2)`` is strictly independent of ``phi`` on a
+    centered disk, the spherical propagation phase ``exp(i * (omega / c) * |r_det|)``
+    commutes with ``d/d phi`` and cancels identically against ``E_tilde^*`` without
+    finite-difference dispersion or curvature aliasing.
+    """
     if detector_positions.ndim != 3 or detector_positions.shape[-1] != 3:
         raise ValueError(
-            f"detector_positions must have shape (Nx, Ny, 3), got {detector_positions.shape}"
+            f"detector_positions must have shape (Nr, Nphi, 3), got {detector_positions.shape}"
+        )
+    if electric_field.shape != detector_positions.shape:
+        raise ValueError(
+            f"electric_field shape {electric_field.shape} must match detector_positions shape {detector_positions.shape}"
+        )
+
+    n_phi = electric_field.shape[1]
+    m = np.fft.fftfreq(n_phi, d=1.0 / n_phi)
+    if n_phi % 2 == 0:
+        m[n_phi // 2] = 0.0
+
+    dE_dphi = np.fft.ifft(
+        1j * m[None, :, None] * np.fft.fft(electric_field, axis=1), axis=1
+    )
+    return (c / (1j * omega)) * np.sum(np.conjugate(electric_field) * dE_dphi, axis=-1)
+
+
+def compute_detector_oam_spectral_density(
+    detector_grid: DetectorGrid, electric_field: np.ndarray, omega: float
+) -> np.ndarray:
+    """Dispatches radiated OAM spectral density computation for rectangular or disk detectors."""
+    expected_shape = (*detector_grid.grid_shape, 3)
+    if electric_field.shape != expected_shape:
+        raise ValueError(
+            f"electric_field shape {electric_field.shape} must match {expected_shape}"
+        )
+
+    if detector_grid.is_polar:
+        return compute_angular_momentum_derivative_polar(
+            detector_grid.local_coords_2d, electric_field, omega
+        )
+    return compute_angular_momentum_derivative(
+        detector_grid.local_coords_2d, electric_field, omega
+    )
+
+
+def _integrate_detector_scalar_2d(
+    detector_positions: np.ndarray,
+    values: np.ndarray,
+    area_weights: np.ndarray | None = None,
+) -> float:
+    """Integrates a 2D scalar array over a detector grid using explicit `area_weights`
+    when provided or rectangular trapezoidal integration otherwise.
+    """
+    if detector_positions.ndim != 3 or detector_positions.shape[-1] != 3:
+        raise ValueError(
+            f"detector_positions must have shape (N1, N2, 3), got {detector_positions.shape}"
         )
     if values.shape != detector_positions.shape[:2]:
         raise ValueError(
             f"values shape {values.shape} must match detector grid shape {detector_positions.shape[:2]}"
         )
+
+    if area_weights is not None:
+        if area_weights.shape != values.shape:
+            raise ValueError(
+                f"area_weights shape {area_weights.shape} must match values shape {values.shape}"
+            )
+        return float(np.sum(values * area_weights))
 
     xs = detector_positions[:, 0, 0]
     ys = detector_positions[0, :, 1]
@@ -134,12 +197,16 @@ def _integrate_detector_scalar_2d(
 
 
 def integrate_detector_oam_spectral_density(
-    detector_positions: np.ndarray, dL_z: np.ndarray
+    detector_positions: np.ndarray,
+    dL_z: np.ndarray,
+    area_weights: np.ndarray | None = None,
 ) -> float:
     """Integrates the radiated OAM spectral density ``d^2 L_z / (d omega dA)``
-    over a 2D rectangular detector grid to return ``dL_z / d omega``.
+    over a 2D detector grid to return ``dL_z / d omega``.
     """
-    return _integrate_detector_scalar_2d(detector_positions, np.real(dL_z))
+    return _integrate_detector_scalar_2d(
+        detector_positions, np.real(dL_z), area_weights=area_weights
+    )
 
 
 def compute_oam_per_photon(
@@ -148,6 +215,7 @@ def compute_oam_per_photon(
     dL_z: np.ndarray,
     omega: float,
     propagation_sign: int = 1,
+    area_weights: np.ndarray | None = None,
 ) -> float:
     """Computes the dimensionless orbital angular momentum per photon
     ``<l> = propagation_sign * omega * (dL_z / d omega) / (dU / d omega)``
@@ -165,9 +233,13 @@ def compute_oam_per_photon(
             f"electric_field shape {electric_field.shape} must match {(*detector_positions.shape[:2], 3)}"
         )
 
-    total_dLz_domega = integrate_detector_oam_spectral_density(detector_positions, dL_z)
+    total_dLz_domega = integrate_detector_oam_spectral_density(
+        detector_positions, dL_z, area_weights=area_weights
+    )
     dU_domega_dA = c * np.sum(np.abs(electric_field) ** 2, axis=-1)
-    total_dU_domega = _integrate_detector_scalar_2d(detector_positions, dU_domega_dA)
+    total_dU_domega = _integrate_detector_scalar_2d(
+        detector_positions, dU_domega_dA, area_weights=area_weights
+    )
 
     if total_dU_domega <= 0.0:
         return 0.0
