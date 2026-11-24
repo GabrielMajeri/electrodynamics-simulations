@@ -25,13 +25,27 @@ from electrodynamics.constants import (
     ELECTRON_MASS,
     HARTREE_TO_EV,
     SPEED_OF_LIGHT,
+    au_length_to_meters,
 )
 from electrodynamics.detector import (
     build_detector_grid,
     create_detector_parameters,
     project_fields_to_detector_frame,
 )
+from electrodynamics.energy import (
+    analyze_energy_transfer,
+    build_energy_summary_dict,
+    build_frequency_quadrature,
+    compute_detector_spectral_energy,
+    compute_detector_total_energy,
+    compute_electron_kinetic_energy_balance,
+    compute_factorized_detector_energy,
+    compute_incident_beam_energy,
+    compute_larmor_radiated_energy_step,
+    format_energy_transfer_report,
+)
 from electrodynamics.fields import (
+    compute_coherent_detector_fields_multifreq,
     compute_relativistic_reflection_parameters,
     compute_scattered_electric_and_magnetic_fields,
 )
@@ -60,13 +74,21 @@ m_e = ELECTRON_MASS
 q = ELECTRON_CHARGE
 
 type IterationState = tuple[
-    jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
 ]
 
 
 @jax.shard_map(
-    in_specs=(P("i"),) * 2 + (None,) * 11,
-    out_specs=(P("i"),) * 6,
+    in_specs=(P("i"),) * 2 + (None,) * 12,
+    out_specs=(P("i"),) * 7 + (P(), P()),
 )
 def integrate_particles_flying_mirror(
     initial_positions: jax.Array,
@@ -82,7 +104,18 @@ def integrate_particles_flying_mirror(
     num_frequencies: jdc.Static[int],
     spectrum_measurement_position: jdc.Static[jax.Array],
     detector_positions: jdc.Static[jax.Array],
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+    energy_frequencies: jdc.Static[jax.Array],
+) -> tuple[
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+]:
     """Integrates electron trajectories in the thin relativistic flying mirror
     in laboratory time and accumulates the coherently scattered Liénard-Wiechert
     electric and magnetic fields across the frequency spectrum and 2D detector grid.
@@ -117,6 +150,26 @@ def integrate_particles_flying_mirror(
         "i",
         to="varying",
     )
+    larmor_energy = jax.lax.pcast(
+        jnp.zeros(shape=(batch_size,), dtype=jnp.float64),
+        "i",
+        to="varying",
+    )
+    num_energy_frequencies = len(energy_frequencies)
+    detector_electric_field_multifreq = jax.lax.pcast(
+        jnp.zeros(
+            shape=(num_detector_points, num_energy_frequencies, 3), dtype=jnp.complex128
+        ),
+        "i",
+        to="varying",
+    )
+    detector_magnetic_field_multifreq = jax.lax.pcast(
+        jnp.zeros(
+            shape=(num_detector_points, num_energy_frequencies, 3), dtype=jnp.complex128
+        ),
+        "i",
+        to="varying",
+    )
 
     num_time_steps = round((end_time - start_time) / time_step)
 
@@ -128,6 +181,9 @@ def integrate_particles_flying_mirror(
             previous_scattered_magnetic_field,
             previous_detector_electric_field,
             previous_detector_magnetic_field,
+            previous_larmor_energy,
+            previous_detector_electric_field_mf,
+            previous_detector_magnetic_field_mf,
         ) = u
 
         new_positions, new_momenta = integration_step_rk4_lab_time(
@@ -182,6 +238,38 @@ def integrate_particles_flying_mirror(
         new_detector_magnetic_field = (
             previous_detector_magnetic_field + time_step * magnetic_field_det
         )
+        new_larmor_energy = (
+            previous_larmor_energy
+            + compute_larmor_radiated_energy_step(
+                new_positions,
+                new_momenta,
+                time_step,
+                laser_parameters,
+                pulse_parameters,
+                incidence_angle=incidence_angle,
+                is_lab_time=True,
+            )
+        )
+
+        if num_energy_frequencies > 0:
+            dE_mf, dB_mf = compute_coherent_detector_fields_multifreq(
+                new_positions,
+                new_momenta,
+                initial_positions,
+                detector_positions,
+                energy_frequencies,
+                is_lab_time=True,
+                initial_momentum=initial_momenta,
+            )
+            new_detector_electric_field_mf = (
+                previous_detector_electric_field_mf + time_step * dE_mf
+            )
+            new_detector_magnetic_field_mf = (
+                previous_detector_magnetic_field_mf + time_step * dB_mf
+            )
+        else:
+            new_detector_electric_field_mf = previous_detector_electric_field_mf
+            new_detector_magnetic_field_mf = previous_detector_magnetic_field_mf
 
         u_next = (
             new_positions,
@@ -190,6 +278,9 @@ def integrate_particles_flying_mirror(
             new_scattered_magnetic_field,
             new_detector_electric_field,
             new_detector_magnetic_field,
+            new_larmor_energy,
+            new_detector_electric_field_mf,
+            new_detector_magnetic_field_mf,
         )
         return u_next, None
 
@@ -201,6 +292,9 @@ def integrate_particles_flying_mirror(
             scattered_magnetic_field,
             detector_electric_field,
             detector_magnetic_field,
+            larmor_energy,
+            detector_electric_field_multifreq,
+            detector_magnetic_field_multifreq,
         ),
         _,
     ) = jax.lax.scan(
@@ -212,6 +306,9 @@ def integrate_particles_flying_mirror(
             scattered_magnetic_field,
             detector_electric_field,
             detector_magnetic_field,
+            larmor_energy,
+            detector_electric_field_multifreq,
+            detector_magnetic_field_multifreq,
         ),
         None,
         length=num_time_steps,
@@ -224,6 +321,9 @@ def integrate_particles_flying_mirror(
         scattered_magnetic_field,
         detector_electric_field,
         detector_magnetic_field,
+        larmor_energy,
+        jax.lax.psum(detector_electric_field_multifreq, "i"),
+        jax.lax.psum(detector_magnetic_field_multifreq, "i"),
     )
 
 
@@ -237,6 +337,9 @@ class FlyingMirrorResult:
     detector_electric_field: jax.Array
     detector_magnetic_field: jax.Array
     detector_incoherent_intensity: jax.Array
+    larmor_energy_per_particle: jax.Array
+    detector_electric_field_multifreq: jax.Array
+    detector_magnetic_field_multifreq: jax.Array
 
 
 def simulate_flying_mirror(
@@ -253,6 +356,7 @@ def simulate_flying_mirror(
     num_frequencies: jdc.Static[int],
     spectrum_measurement_position: jax.Array,
     detector_positions: jdc.Static[jax.Array],
+    energy_frequencies: jax.Array,
     batch_size: jdc.Static[int],
 ) -> FlyingMirrorResult:
     print(
@@ -261,6 +365,7 @@ def simulate_flying_mirror(
 
     final_positions = []
     final_momenta = []
+    larmor_energies = []
     scattered_electric_field_spectrum = jnp.zeros(
         (num_frequencies, 3), dtype=jnp.complex128
     )
@@ -275,6 +380,12 @@ def simulate_flying_mirror(
     )
     detector_incoherent_intensity = jnp.zeros(
         (len(detector_positions),), dtype=jnp.float64
+    )
+    detector_electric_field_multifreq = jnp.zeros(
+        (len(detector_positions), len(energy_frequencies), 3), dtype=jnp.complex128
+    )
+    detector_magnetic_field_multifreq = jnp.zeros(
+        (len(detector_positions), len(energy_frequencies), 3), dtype=jnp.complex128
     )
 
     for (
@@ -293,6 +404,9 @@ def simulate_flying_mirror(
             batch_scattered_magnetic_field_spectrum,
             batch_detector_electric_field,
             batch_detector_magnetic_field,
+            batch_larmor_energy,
+            batch_detector_electric_field_mf,
+            batch_detector_magnetic_field_mf,
         ) = integrate_particles_flying_mirror(
             batch_positions,
             batch_momenta,
@@ -307,10 +421,12 @@ def simulate_flying_mirror(
             num_frequencies,
             spectrum_measurement_position,
             detector_positions,
+            energy_frequencies,
         )
 
         final_positions.append(batch_final_positions.block_until_ready())
         final_momenta.append(batch_final_momenta.block_until_ready())
+        larmor_energies.append(batch_larmor_energy.block_until_ready())
         scattered_electric_field_spectrum += jnp.sum(
             batch_scattered_electric_field_spectrum, axis=0
         ).block_until_ready()
@@ -327,6 +443,12 @@ def simulate_flying_mirror(
             jnp.sum(jnp.abs(batch_detector_electric_field) ** 2, axis=-1),
             axis=0,
         ).block_until_ready()
+        detector_electric_field_multifreq += (
+            batch_detector_electric_field_mf.block_until_ready()
+        )
+        detector_magnetic_field_multifreq += (
+            batch_detector_magnetic_field_mf.block_until_ready()
+        )
 
     return FlyingMirrorResult(
         np.linspace(
@@ -341,6 +463,9 @@ def simulate_flying_mirror(
         detector_electric_field,
         detector_magnetic_field,
         detector_incoherent_intensity,
+        jnp.concatenate(larmor_energies),
+        detector_electric_field_multifreq,
+        detector_magnetic_field_multifreq,
     )
 
 
@@ -462,6 +587,30 @@ def main(
     num_frequencies: Annotated[
         int, typer.Option(help="Number of frequency points in the spectrum")
     ] = 256,
+    energy_num_frequencies: Annotated[
+        int,
+        typer.Option(
+            help="Number of Gauss-Legendre frequency nodes for total detector energy (0 to use factorized estimate only)"
+        ),
+    ] = 16,
+    energy_bandwidth_fraction: Annotated[
+        float,
+        typer.Option(
+            help="Full fractional bandwidth Delta_omega / omega_1 for total detector energy quadrature"
+        ),
+    ] = 0.6,
+    physical_electrons: Annotated[
+        float | None,
+        typer.Option(
+            help="Optional physical electron count N_real for coherent N_e^2 bunch extrapolation"
+        ),
+    ] = None,
+    physical_bunch_charge_pc: Annotated[
+        float | None,
+        typer.Option(
+            help="Optional physical bunch charge in pC for coherent N_e^2 extrapolation"
+        ),
+    ] = None,
     steps_per_period: Annotated[
         int, typer.Option(help="Number of RK4 integration steps per laser period T_0")
     ] = 150,
@@ -492,6 +641,15 @@ def main(
     print(
         f"[bold green]Started flying mirror reflection study at {run_datetime}[/bold green]"
     )
+
+    if energy_num_frequencies < 0:
+        raise ValueError(
+            f"energy_num_frequencies must be >= 0, got {energy_num_frequencies}"
+        )
+    if physical_electrons is not None and physical_bunch_charge_pc is not None:
+        raise ValueError(
+            "Specify at most one of --physical-electrons or --physical-bunch-charge-pc."
+        )
 
     initialize_jax()
 
@@ -589,9 +747,29 @@ def main(
     )
     detector_width = detector_width_beams * diffracted_beam_waist
 
+    detector_distance_m = au_length_to_meters(detector_distance)
+    detector_width_m = au_length_to_meters(detector_width)
+
     print(
         f"Detector placed in far field at R_det = {actual_detector_distance_lambda:.1f} lambda_0 "
-        f"({detector_distance / reflected_rayleigh_range:.1f} x z_{{R,1}}), diffracted waist w_1 = {diffracted_beam_waist / laser_wavelength:.1f} lambda_0"
+        f"({detector_distance / reflected_rayleigh_range:.1f} x z_{{R,1}}, {detector_distance_m:.4f} m), "
+        f"diffracted waist w_1 = {diffracted_beam_waist / laser_wavelength:.1f} lambda_0, "
+        f"span = {detector_width_m * 1e3:.3f} mm"
+    )
+
+    energy_quadrature = (
+        build_frequency_quadrature(
+            reflected_frequency,
+            bandwidth_fraction=energy_bandwidth_fraction,
+            num_frequencies=energy_num_frequencies,
+        )
+        if energy_num_frequencies > 0
+        else None
+    )
+    energy_frequencies_jnp = (
+        jnp.asarray(energy_quadrature.frequencies)
+        if energy_quadrature is not None
+        else jnp.zeros((0,), dtype=jnp.float64)
     )
 
     detector_parameters = create_detector_parameters(
@@ -657,10 +835,16 @@ def main(
         "num_electrons": num_electrons,
         "detector_distance_lambda": detector_distance_lambda,
         "actual_detector_distance_lambda": actual_detector_distance_lambda,
+        "detector_distance_m": detector_distance_m,
         "diffracted_beam_waist_lambda": diffracted_beam_waist / laser_wavelength,
         "detector_width_lambda": detector_width / laser_wavelength,
+        "detector_width_m": detector_width_m,
         "detector_shape": detector_shape,
         "detector_parameters": detector_parameters,
+        "energy_num_frequencies": energy_num_frequencies,
+        "energy_bandwidth_fraction": energy_bandwidth_fraction,
+        "physical_electrons": physical_electrons,
+        "physical_bunch_charge_pc": physical_bunch_charge_pc,
         "time_start": integration_start_time,
         "time_end": integration_end_time,
         "time_delta": time_step,
@@ -694,6 +878,7 @@ def main(
         num_frequencies,
         spectrum_measurement_position,
         detector_positions_jnp,
+        energy_frequencies_jnp,
         batch_size,
     )
     duration = perf_counter() - start_wall
@@ -838,6 +1023,105 @@ def main(
     np.save(output_directory / "spectrum_frequencies.npy", result.frequencies)
     np.save(output_directory / "spectrum_electric_field.npy", spec_E_np)
 
+    detector_spectral_energy = compute_detector_spectral_energy(
+        det_E_local,
+        det_B_local,
+        detector_area_weights,
+        normal_vector=detector_grid.normal_local,
+        detector_positions=detector_local_coords_2d,
+    )
+    factorized_energy = compute_factorized_detector_energy(
+        det_E_local,
+        det_B_local,
+        detector_area_weights,
+        result.frequencies,
+        spec_E_np,
+        reference_frequency=reflected_frequency,
+        normal_vector=detector_grid.normal_local,
+    )
+
+    if energy_quadrature is not None:
+        det_E_mf_grid = detector_parameters.reshape_to_grid(
+            np.asarray(result.detector_electric_field_multifreq)
+        )
+        det_B_mf_grid = detector_parameters.reshape_to_grid(
+            np.asarray(result.detector_magnetic_field_multifreq)
+        )
+        detector_total_energy = compute_detector_total_energy(
+            det_E_mf_grid,
+            det_B_mf_grid,
+            detector_area_weights,
+            energy_quadrature.weights,
+            normal_vector=detector_grid.normal_lab,
+            detector_positions=detector_grid.reshape_to_grid(detector_positions_flat),
+        )
+        detector_energy_au = detector_total_energy.total_energy_au
+        energy_method = "multifreq-quadrature"
+        np.save(
+            output_directory / "detector_fluence.npy",
+            detector_total_energy.fluence_per_pixel,
+        )
+        np.save(
+            output_directory / "detector_energy_spectrum_frequencies.npy",
+            energy_quadrature.frequencies,
+        )
+        np.save(
+            output_directory / "detector_energy_spectrum_dU_domega.npy",
+            detector_total_energy.spectrum_dU_domega,
+        )
+    else:
+        detector_total_energy = None
+        detector_energy_au = factorized_energy.total_energy_au
+        energy_method = "factorized-bandwidth"
+
+    incident_energy_au = compute_incident_beam_energy(laser_parameters, pulse_parameters)
+    intercepted_incident_energy_au = compute_incident_beam_energy(
+        laser_parameters,
+        pulse_parameters,
+        aperture_radius=sheet_radius,
+        incidence_angle=incidence_angle,
+    )
+    kinetic_balance = compute_electron_kinetic_energy_balance(
+        initial_momenta, result.final_momenta, particle_mass=m_e
+    )
+    larmor_energy_au = float(jnp.sum(result.larmor_energy_per_particle))
+
+    energy_analysis = analyze_energy_transfer(
+        detector_energy_au=detector_energy_au,
+        incident_energy_au=incident_energy_au,
+        doppler_factor=doppler_factor,
+        num_electrons=num_electrons,
+        detector_energy_factorized_au=factorized_energy.total_energy_au,
+        intercepted_incident_energy_au=intercepted_incident_energy_au,
+        larmor_energy_au=larmor_energy_au,
+        electron_kinetic_energy=kinetic_balance,
+        sheet_radius=sheet_radius,
+        gamma=gamma,
+        laser_frequency=laser_frequency,
+        incidence_angle=incidence_angle,
+        physical_num_electrons=physical_electrons,
+        physical_bunch_charge_pc=physical_bunch_charge_pc,
+    )
+    print(
+        format_energy_transfer_report(
+            energy_analysis,
+            detector_spectral_energy=detector_spectral_energy,
+            detector_total_energy=detector_total_energy,
+            factorized_detector_energy=factorized_energy,
+        )
+    )
+    save_json(
+        output_directory / "energy_summary.json",
+        build_energy_summary_dict(
+            energy_analysis,
+            detector_spectral_energy=detector_spectral_energy,
+            detector_total_energy=detector_total_energy,
+            factorized_detector_energy=factorized_energy,
+            frequency_quadrature=energy_quadrature,
+            energy_method=energy_method,
+        ),
+    )
+
     summary = {
         "radial_index": radial_index,
         "azimuthal_index": azimuthal_index,
@@ -861,6 +1145,8 @@ def main(
         "simulated_photon_energy_kev": (simulated_peak_frequency * HARTREE_TO_EV)
         / 1000.0,
         "actual_detector_distance_lambda": actual_detector_distance_lambda,
+        "detector_distance_m": detector_distance_m,
+        "detector_width_m": detector_width_m,
         "theoretical_profile_tilt_angle_rad": profile_tilt_angle,
         "peak_coherent_intensity": peak_coherent_intensity,
         "mean_incoherent_intensity": mean_incoherent_intensity,
@@ -868,6 +1154,19 @@ def main(
         "total_radiated_Lz_au": total_radiated_Lz,
         "oam_per_photon_lab": oam_per_photon_lab,
         "oam_per_photon_beam": oam_per_photon_beam,
+        "energy_method": energy_method,
+        "detector_energy_au": energy_analysis.detector_energy_au,
+        "detector_energy_joules": energy_analysis.detector_energy_joules,
+        "detector_energy_factorized_au": factorized_energy.total_energy_au,
+        "incident_energy_au": energy_analysis.incident_energy_au,
+        "larmor_energy_au": larmor_energy_au,
+        "laser_energy_fraction": energy_analysis.laser_energy_fraction,
+        "photon_reflectivity": energy_analysis.photon_reflectivity,
+        "thin_sheet_theory_energy_au": (
+            energy_analysis.thin_sheet_benchmark.weak_theory_energy_au
+            if energy_analysis.thin_sheet_benchmark is not None
+            else None
+        ),
         "detector_shape": detector_shape,
         "num_electrons": num_electrons,
         "sampling_method": sampling_method,

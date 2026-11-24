@@ -295,3 +295,103 @@ def compute_coherent_detector_and_spectrum_fields(
 
     dE_spec = jax.vmap(compute_spec)(frequencies)
     return dE_det, dB_det, dE_spec
+
+
+@jdc.jit
+def compute_coherent_detector_fields_multifreq(
+    positions: jax.Array,
+    momenta: jax.Array,
+    origin_positions: jax.Array,
+    detector_positions: jax.Array,
+    frequencies: jax.Array,
+    is_lab_time: jdc.Static[bool] = True,
+    initial_momentum: jax.Array | None = None,
+    include_second_order_terms: jdc.Static[bool] = False,
+    pixel_batch_size: jdc.Static[int | None] = 64,
+) -> tuple[jax.Array, jax.Array]:
+    """Fused multi-frequency Liénard-Wiechert coherent detector kernel.
+
+    Evaluates frequency-independent geometric terms once per `(particle, pixel)` pair
+    and contracts particle contributions over `frequencies` inside the kernel, returning
+    compact arrays of shape `(num_pixels, num_frequencies, 3)`.
+    """
+    laboratory_time = positions[:, 0] / c
+    particle_position = positions[:, 1:4]
+    initial_pos_3d = origin_positions[:, 1:4]
+    particle_displacement = particle_position - initial_pos_3d
+    r_squared = jnp.sum(particle_position * particle_position, axis=-1)
+
+    particle_velocity = momenta[:, 1:4]
+    gamma_factor = jnp.expand_dims(momenta[:, 0] / c, axis=-1)
+
+    if is_lab_time:
+        beta = (particle_velocity / gamma_factor) / c
+        if initial_momentum is not None:
+            init_gamma = jnp.expand_dims(initial_momentum[:, 0] / c, axis=-1)
+            beta_0 = (initial_momentum[:, 1:4] / init_gamma) / c
+            beta = beta - beta_0
+    else:
+        beta = particle_velocity / c
+        if initial_momentum is not None:
+            init_gamma = jnp.expand_dims(initial_momentum[:, 0] / c, axis=-1)
+            beta_0 = (initial_momentum[:, 1:4] / init_gamma) / c
+            beta = beta - gamma_factor * beta_0
+
+    freqs = jnp.asarray(frequencies)
+
+    def compute_pixel(dp: jax.Array) -> tuple[jax.Array, jax.Array]:
+        displacement = (dp - initial_pos_3d) - particle_displacement
+        displacement_norm = jnp.linalg.vector_norm(displacement, axis=-1)
+        displacement_norm_col = jnp.expand_dims(displacement_norm, axis=-1)
+        view_direction = displacement / displacement_norm_col
+
+        detector_norm = jnp.linalg.vector_norm(dp)
+        x_dot_r = jnp.sum(particle_position * dp, axis=-1)
+        delta_r = (-2.0 * x_dot_r + r_squared) / (
+            displacement_norm + detector_norm + 1e-30
+        )
+        retarded_time_offset = laboratory_time + delta_r / c
+
+        n_cross_beta = jnp.cross(view_direction, beta)
+        e_common = jnp.cross(view_direction, n_cross_beta)
+        e_geom = e_common / displacement_norm_col
+        b_geom = n_cross_beta / displacement_norm_col
+
+        phase_matrix = jnp.exp(1j * retarded_time_offset[:, None] * freqs[None, :])
+        phase_re = jnp.real(phase_matrix)
+        phase_im = jnp.imag(phase_matrix)
+
+        e_sum = jnp.matmul(phase_re.T, e_geom) + 1j * jnp.matmul(phase_im.T, e_geom)
+        b_sum = jnp.matmul(phase_re.T, b_geom) + 1j * jnp.matmul(phase_im.T, b_geom)
+
+        det_phase = jnp.exp(1j * freqs * (detector_norm / c))
+        e_prefactor = (-(1j * freqs) / (2.0 * pi * c)) * det_phase
+        b_prefactor = ((1j * freqs) / (2.0 * pi * c)) * det_phase
+
+        E_pix = e_prefactor[:, None] * e_sum
+        B_pix = b_prefactor[:, None] * b_sum
+
+        if include_second_order_terms:
+            inv_r_sq = 1.0 / (displacement_norm_col * displacement_norm_col)
+            ndotb = jnp.expand_dims(jnp.linalg.vecdot(view_direction, beta), axis=-1)
+            e_geom2 = (
+                e_common
+                + view_direction * ((1.0 if is_lab_time else gamma_factor) + ndotb)
+            ) * inv_r_sq
+            b_geom2 = n_cross_beta * inv_r_sq
+            base_prefactor = (1.0 / (2.0 * pi)) * det_phase
+            E_pix = E_pix + base_prefactor[:, None] * (
+                jnp.matmul(phase_re.T, e_geom2) + 1j * jnp.matmul(phase_im.T, e_geom2)
+            )
+            B_pix = B_pix + base_prefactor[:, None] * (
+                jnp.matmul(phase_re.T, b_geom2) + 1j * jnp.matmul(phase_im.T, b_geom2)
+            )
+
+        return E_pix, B_pix
+
+    if pixel_batch_size is not None and pixel_batch_size > 0:
+        return jax.lax.map(
+            compute_pixel, detector_positions, batch_size=pixel_batch_size
+        )
+
+    return jax.vmap(compute_pixel)(detector_positions)

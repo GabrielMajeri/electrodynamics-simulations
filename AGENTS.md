@@ -13,6 +13,7 @@ Operational guide for AI coding agents working in `electrodynamics-simulations` 
 - **Run on the Slurm GPU node** (requires CUDA extras and loading the CUDA module):
   `bash -lc "module load cuda/13.4.3 && srun --account=acc-c-fiz-26-004 --partition=gpu --gpus=2 .venv/bin/python scripts/<script>.py ..."`
   Running JAX on the login node without loading CUDA falls back to CPU (logging a `cuPTI` load warning).
+  **Note**: unless told otherwise, it's recommended to always launch scripts on the GPU node, requesting no more than 2 GPUs.
 - **Type checking**: `basedpyright` in `basic` mode (see `.vscode/settings.json`).
 
 ## Architecture & Boundaries
